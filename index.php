@@ -162,10 +162,12 @@ function showLoginPage() {
                     <h1><?= htmlspecialchars($site_name) ?></h1>
                     <div class="subtitle">免费额度水龙头控制系统</div>
                 </div>
-                <a href="/>" class="btn-back" target="_blank">返回主页</a>
-                <?php if (!empty($api_site_url)): ?>
-                <a href="<?= htmlspecialchars($api_site_url) ?>" class="btn-back" target="_blank">返回API站</a>
-                <?php endif; ?>
+                <div class="header-actions">
+                    <a href="/" class="btn-back" target="_blank">返回主页</a>
+                    <?php if (!empty($api_site_url)): ?>
+                    <a href="<?= htmlspecialchars($api_site_url) ?>" class="btn-back" target="_blank">返回API站</a>
+                    <?php endif; ?>
+                </div>
             </div>
         </div>
 

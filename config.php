@@ -13,6 +13,7 @@ if (!file_exists($env_file)) {
     die('错误：未找到 .env 文件，请复制 .env.example 为 .env 并填写配置');
 }
 
+$_tap_env = [];
 $env_lines = file($env_file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
 foreach ($env_lines as $line) {
     $line = trim($line);
@@ -25,19 +26,18 @@ foreach ($env_lines as $line) {
     list($key, $value) = explode('=', $line, 2);
     $key = trim($key);
     $value = trim($value);
-    putenv("$key=$value");
-    $_ENV[$key] = $value;
+    $_tap_env[$key] = $value;
 }
 
 // ============ 辅助函数：读取环境变量 ============
 function env(string $key, string $default = ''): string {
-    $val = getenv($key);
-    return $val !== false ? $val : $default;
+    global $_tap_env;
+    return isset($_tap_env[$key]) ? $_tap_env[$key] : $default;
 }
 
 function envInt(string $key, int $default = 0): int {
-    $val = getenv($key);
-    return $val !== false ? (int)$val : $default;
+    global $_tap_env;
+    return isset($_tap_env[$key]) ? (int)$_tap_env[$key] : $default;
 }
 
 // ============ 数据库配置 ============

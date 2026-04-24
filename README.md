@@ -11,6 +11,22 @@
 5. 未超过 → 开启水龙头（添加 `free` 分组）
 6. 每天重新计算，已消耗的天数不再参与分配
 
+## 渠道模式
+
+系统支持三种渠道额度模式：
+
+| 模式 | 配置值 | 说明 | 是否参与月度总额 |
+|------|--------|------|-----------------|
+| 共享月度 | `shared` | 共享全局 `MONTHLY_TOKENS`，按剩余天数均分 | ✅ 是 |
+| 独立月度 | `monthly` | 独立月度额度，按剩余天数均分 | ❌ 否 |
+| 独立日额 | `daily` | 每日固定额度，次日自动重置 | ❌ 否 |
+
+**共享月度（shared）**：多个渠道共享同一个月度总额度池，适合统一管理的渠道。
+
+**独立月度（monthly）**：渠道有独立的月度额度，按剩余天数均分，用完即关闸。不占用全局月度总额。
+
+**独立日额（daily）**：渠道每天有固定额度，用完当天关闸，次日自动重置。不参与月度总额计算，适合需要每日固定免费额度的渠道。
+
 ## 数据库架构
 
 | 数据库 | 用途 | 表 |
@@ -24,27 +40,43 @@
 
 ## 快速开始
 
-### 1. 修改配置
+### 1. 配置环境变量
 
-编辑 `config.php`：
+复制 `.env.example` 为 `.env`，修改配置：
 
-```php
-// 每月免费 token 额度
-$monthly_tokens = 100000000; // 1亿 token
-
-// 渠道配置
-$tap_channels = [
-    [
-        'channel_id'    => 35,
-        'open_groups'   => 'default,vip,svip,free',
-        'closed_groups' => 'default,vip,svip',
-        'name'          => '免费渠道 #35',
-    ],
-];
-
-// 访问密钥（建议设置）
-$access_key = 'your-secret-key';
+```bash
+cp .env.example .env
 ```
+
+编辑 `.env`：
+
+```env
+# 数据库配置
+NEWAPI_DB_HOST=localhost
+NEWAPI_DB_USER=newapi
+NEWAPI_DB_PASS=your_password
+NEWAPI_DB_NAME=newapi
+
+TAP_DB_HOST=localhost
+TAP_DB_USER=newapi_tap
+TAP_DB_PASS=your_password
+TAP_DB_NAME=newapi_tap
+
+# 站点配置
+SITE_NAME=MyAPI-TAP
+API_SITE_URL=https://your-api-site.com
+
+# 月度总额度（仅 shared 模式渠道使用）
+MONTHLY_TOKENS=100000000
+
+# 渠道配置（格式：渠道ID:模式:额度:开启分组:关闭分组）
+TAP_CHANNELS=35:shared:0:default,vip,svip,free:default,vip,svip
+
+# 访问密钥（建议设置，留空则不验证）
+ACCESS_KEY=your-secret-key
+```
+
+> ⚠️ `.env` 文件已在 `.gitignore` 中排除，不会被提交到版本库。
 
 ### 2. 运行安装
 
@@ -54,10 +86,9 @@ php install.php
 
 此脚本会：
 - 自动创建 `newapi_tap` 数据库
-- 创建 `tap_state` 状态表
-- 创建 `tap_logs` 日志表
+- 创建 `tap_state` 状态表和 `tap_logs` 日志表
 - 初始化默认状态
-- 验证 `quota_data` 表和渠道是否存在
+- 验证 newapi 数据库表和渠道是否存在
 
 ### 3. 设置定时任务
 
@@ -90,15 +121,49 @@ Register-ScheduledTask -TaskName "NewAPI-TAP" -Action $action -Trigger $Trigger 
 
 | 文件 | 说明 |
 |------|------|
-| `config.php` | 配置文件（数据库、额度、渠道等） |
+| `config.php` | 配置加载（从 .env 读取，数据库连接等） |
 | `install.php` | 安装脚本（建库建表、初始化） |
 | `cron.php` | 定时检查脚本（核心逻辑） |
 | `index.php` | Web 仪表盘（状态展示） |
+| `style.css` | 样式表 |
+| `.env` | 环境配置（不入库） |
+| `.env.example` | 环境配置模板 |
+
+## 渠道配置详解
+
+### 配置格式
+
+```
+TAP_CHANNELS=渠道ID:模式:额度:开启分组:关闭分组
+```
+
+多个渠道用分号 `;` 分隔。
+
+### 配置示例
+
+```env
+# 渠道35: 共享月度，使用全局总额度均分
+# 渠道36: 独立月度，每月5000万token
+# 渠道37: 独立日额，每日200万token
+TAP_CHANNELS=35:shared:0:default,vip,svip,free:default,vip,svip;36:monthly:50000000:default,vip,free:default,vip;37:daily:2000000:default,free:default
+```
+
+### 字段说明
+
+| 字段 | 说明 |
+|------|------|
+| 渠道ID | newapi 中 `channels` 表的 `id` |
+| 模式 | `shared` / `monthly` / `daily` |
+| 额度 | shared 填 0；monthly 填月度 token 数；daily 填每日 token 数 |
+| 开启分组 | 水龙头开启时 `channels.group` 的值（包含 `free`） |
+| 关闭分组 | 水龙头关闭时 `channels.group` 的值（不含 `free`） |
 
 ## 核心算法
 
+### shared / monthly 模式
+
 ```
-月度剩余 = 月度总 token - 本月已消耗 token
+月度剩余 = 月度总额 - 本月已消耗
 今日额度 = 月度剩余 / 本月剩余天数（含今天）
 今日剩余 = 今日额度 - 今日已消耗
 
@@ -108,41 +173,39 @@ Register-ScheduledTask -TaskName "NewAPI-TAP" -Action $action -Trigger $Trigger 
 
 **特点**：每天重新均分剩余额度，前期用多了后面天数额度自动减少，形成自平衡。
 
-## 扩展多渠道
+### daily 模式
 
-在 `config.php` 的 `$tap_channels` 数组中添加：
+```
+今日额度 = 固定日额度（配置值）
+今日剩余 = 今日额度 - 今日已消耗
 
-```php
-$tap_channels = [
-    [
-        'channel_id'    => 35,
-        'open_groups'   => 'default,vip,svip,free',
-        'closed_groups' => 'default,vip,svip',
-        'name'          => 'GPT-4 免费渠道',
-    ],
-    [
-        'channel_id'    => 42,
-        'open_groups'   => 'default,vip,free',
-        'closed_groups' => 'default,vip',
-        'name'          => 'Claude 免费渠道',
-    ],
-];
+如果 今日已消耗 >= 今日额度 → 关闭水龙头
+如果 今日已消耗 <  今日额度 → 开启水龙头
 ```
 
+**特点**：每天额度固定，次日自动重置，不参与月度总额计算。
+
+## 水龙头开关机制
+
 开水龙头时，系统会：
-1. 更新 `channels` 表的 `group` 字段（添加 `free`）
-2. 读取渠道的 `models` 字段，为每个模型在 `abilities` 表插入 `free` 组记录
+1. 更新 `channels` 表的 `group` 字段（设为开启分组，包含 `free`）
+2. 读取渠道的 `models` 字段，为每个模型在 `abilities` 表插入/更新 `free` 组记录
 
 关水龙头时，系统会：
-1. 更新 `channels` 表的 `group` 字段（移除 `free`）
+1. 更新 `channels` 表的 `group` 字段（设为关闭分组，不含 `free`）
 2. 删除 `abilities` 表中对应渠道的 `free` 组记录
 
-`abilities` 表插入参数可在渠道配置中调整（`abilities_enabled`, `abilities_priority`, `abilities_weight`, `abilities_tag`）。
+分组同步时（状态未变但分组不一致），系统会：
+1. 更新 `channels` 表的 `group` 字段
+2. 根据当前状态添加或移除 `abilities` 记录
+3. 记录 `tap_sync` 日志而非 `tap_open` / `tap_close`
 
 ## 注意事项
 
 - `logs.created_at` 字段使用 Unix 时间戳（整数），与 newapi 标准一致
 - 统计使用 `prompt_tokens + completion_tokens`，仅统计配置渠道（按 `channel_id` 过滤）
 - 本系统统计所有用户在配置渠道的用量，统一切换分组
-- 建议设置 `$access_key` 防止仪表盘被未授权访问
-- 日志默认保留 90 天，可在配置中修改
+- 建议设置 `ACCESS_KEY` 防止仪表盘被未授权访问
+- 日志默认保留 90 天，可在 `.env` 中修改 `LOG_RETENTION_DAYS`
+- `.env` 文件包含敏感信息，已在 `.gitignore` 中排除，请勿提交到版本库
+- 兼容 PHP 7.x+（不使用 `str_starts_with`、`putenv` 等受限函数）

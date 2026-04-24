@@ -72,7 +72,7 @@ foreach ($tap_channels as $ch) {
     $defaults["today_used_{$ch_id}"] = '0';
     $defaults["today_allowance_{$ch_id}"] = '0';
     $defaults["today_remaining_{$ch_id}"] = '0';
-    $defaults["remaining_{$ch_id}"] = (string)($ch['monthly_tokens'] > 0 ? $ch['monthly_tokens'] : $monthly_tokens);
+    $defaults["remaining_{$ch_id}"] = '0';
 }
 
 $stmt = $pdo->prepare(
@@ -127,8 +127,9 @@ try {
         $row = $stmt->fetch();
         if ($row) {
             $model_count = count(array_filter(explode(',', $row['models'])));
-            $quota_info = $ch['monthly_tokens'] > 0 ? formatTokens($ch['monthly_tokens']) . ' tokens/月' : '使用总额度均分';
-            echo "[✓] 渠道 #{$ch['channel_id']} 存在，当前分组: {$row['group']}，模型数: {$model_count}，额度: {$quota_info}\n";
+            $mode_labels = ['shared' => '共享月度', 'monthly' => '独立月度', 'daily' => '独立日额'];
+            $quota_info = $ch['mode'] === 'daily' ? formatTokens($ch['quota']) . ' tokens/日' : ($ch['mode'] === 'monthly' ? formatTokens($ch['quota']) . ' tokens/月' : '使用总额度均分');
+            echo "[✓] 渠道 #{$ch['channel_id']} [{$mode_labels[$ch['mode']]}] 存在，当前分组: {$row['group']}，模型数: {$model_count}，额度: {$quota_info}\n";
         } else {
             echo "[✗] 渠道 #{$ch['channel_id']} 不存在！请检查配置\n";
         }

@@ -3,14 +3,10 @@
  * NewAPI-TAP 定时检查脚本
  * 每5分钟由 cron 执行，检查用量并控制水龙头开关
  * 
- * 逻辑说明：
- * 1. 对每个渠道独立检查：
- *    - 若渠道设置了 monthly_tokens > 0，则按渠道自身额度控制
- *    - 若渠道 monthly_tokens = 0，则按全局总额度控制
- * 2. 计算今日可用 = 剩余 token / 本月剩余天数（含今天）
- * 3. 查询今日已消耗 token
- * 4. 如果今日已消耗 >= 今日可用 → 关闭该渠道水龙头
- *    如果今日已消耗 <  今日可用 → 开启该渠道水龙头
+ * 渠道模式说明：
+ * - shared:  共享月度总额度，按剩余天数均分
+ * - monthly: 独立月度额度，按剩余天数均分
+ * - daily:   独立日额度，每日固定额度，不参与月度总额计算
  */
 require_once __DIR__ . '/config.php';
 
@@ -52,29 +48,44 @@ if ($stored_month !== $current_month) {
         json_encode(['old_month' => $stored_month, 'new_month' => $current_month]));
 }
 
-// ============ 计算全局用量 ============
+// ============ 计算全局月度用量（仅 shared 渠道参与） ============
 
-$channel_ids = array_column($tap_channels, 'channel_id');
-$channel_id_list = implode(',', array_map('intval', $channel_ids));
+$shared_channel_ids = [];
+$all_channel_ids = [];
+foreach ($tap_channels as $ch) {
+    $all_channel_ids[] = $ch['channel_id'];
+    if ($ch['mode'] === 'shared') {
+        $shared_channel_ids[] = $ch['channel_id'];
+    }
+}
+$shared_id_list = implode(',', array_map('intval', $shared_channel_ids));
 
 $month_start_ts = strtotime(date('Y-m-01 00:00:00'));
 $today_start_ts = strtotime(date('Y-m-d 00:00:00'));
-
-$stmt = $newapi_pdo->prepare("SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) as total FROM logs WHERE channel_id IN ($channel_id_list) AND created_at >= ?");
-$stmt->execute([$month_start_ts]);
-$global_month_used = (int)$stmt->fetch()['total'];
-
-$stmt = $newapi_pdo->prepare("SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) as total FROM logs WHERE channel_id IN ($channel_id_list) AND created_at >= ?");
-$stmt->execute([$today_start_ts]);
-$global_today_used = (int)$stmt->fetch()['total'];
-
-$global_remaining = max(0, $monthly_tokens - $global_month_used);
 $days_in_month = (int)date('t');
 $day_of_month = (int)date('j');
 $days_remaining = $days_in_month - $day_of_month + 1;
 
-$global_today_allowance = $days_remaining > 0 ? intdiv($global_remaining, $days_remaining) : 0;
-$global_today_remaining = max(0, $global_today_allowance - $global_today_used);
+// 全局月度用量（仅 shared 渠道）
+if ($shared_id_list !== '') {
+    $stmt = $newapi_pdo->prepare("SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) as total FROM logs WHERE channel_id IN ($shared_id_list) AND created_at >= ?");
+    $stmt->execute([$month_start_ts]);
+    $global_month_used = (int)$stmt->fetch()['total'];
+
+    $stmt = $newapi_pdo->prepare("SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) as total FROM logs WHERE channel_id IN ($shared_id_list) AND created_at >= ?");
+    $stmt->execute([$today_start_ts]);
+    $global_today_used = (int)$stmt->fetch()['total'];
+
+    $global_remaining = max(0, $monthly_tokens - $global_month_used);
+    $global_today_allowance = $days_remaining > 0 ? intdiv($global_remaining, $days_remaining) : 0;
+    $global_today_remaining = max(0, $global_today_allowance - $global_today_used);
+} else {
+    $global_month_used = 0;
+    $global_today_used = 0;
+    $global_remaining = $monthly_tokens;
+    $global_today_allowance = 0;
+    $global_today_remaining = 0;
+}
 
 // ============ 逐渠道检查与控制 ============
 
@@ -83,30 +94,49 @@ $any_closed = false;
 
 foreach ($tap_channels as $channel) {
     $ch_id = $channel['channel_id'];
-    $ch_monthly = $channel['monthly_tokens'];
+    $ch_mode = $channel['mode'];
+    $ch_quota = $channel['quota'];
     $state_key = "tap_open_{$ch_id}";
 
-    // 计算该渠道的用量
-    $stmt = $newapi_pdo->prepare("SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) as total FROM logs WHERE channel_id = ? AND created_at >= ?");
-    $stmt->execute([$ch_id, $month_start_ts]);
-    $ch_month_used = (int)$stmt->fetch()['total'];
-
+    // 计算该渠道的今日用量
     $stmt = $newapi_pdo->prepare("SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) as total FROM logs WHERE channel_id = ? AND created_at >= ?");
     $stmt->execute([$ch_id, $today_start_ts]);
     $ch_today_used = (int)$stmt->fetch()['total'];
 
-    // 确定该渠道的额度来源
-    if ($ch_monthly > 0) {
-        $ch_remaining = max(0, $ch_monthly - $ch_month_used);
-        $ch_today_allowance = $days_remaining > 0 ? intdiv($ch_remaining, $days_remaining) : 0;
-    } else {
-        $ch_monthly = $monthly_tokens;
-        $ch_remaining = $global_remaining;
-        $ch_today_allowance = $global_today_allowance;
-        $ch_month_used = $global_month_used;
-        $ch_today_used = $global_today_used;
+    // 计算该渠道的月度用量
+    $stmt = $newapi_pdo->prepare("SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) as total FROM logs WHERE channel_id = ? AND created_at >= ?");
+    $stmt->execute([$ch_id, $month_start_ts]);
+    $ch_month_used = (int)$stmt->fetch()['total'];
+
+    // 根据模式确定今日额度
+    switch ($ch_mode) {
+        case 'daily':
+            $ch_today_allowance = $ch_quota;
+            $ch_today_remaining = max(0, $ch_today_allowance - $ch_today_used);
+            $ch_monthly = 0;
+            $ch_remaining = 0;
+            $ch_month_pct = 0;
+            break;
+
+        case 'monthly':
+            $ch_monthly = $ch_quota;
+            $ch_remaining = max(0, $ch_monthly - $ch_month_used);
+            $ch_today_allowance = $days_remaining > 0 ? intdiv($ch_remaining, $days_remaining) : 0;
+            $ch_today_remaining = max(0, $ch_today_allowance - $ch_today_used);
+            $ch_month_pct = $ch_monthly > 0 ? min(100, round($ch_month_used / $ch_monthly * 100, 1)) : 0;
+            break;
+
+        case 'shared':
+        default:
+            $ch_monthly = $monthly_tokens;
+            $ch_remaining = $global_remaining;
+            $ch_today_allowance = $global_today_allowance;
+            $ch_today_used = $global_today_used;
+            $ch_month_used = $global_month_used;
+            $ch_today_remaining = $global_today_remaining;
+            $ch_month_pct = $monthly_tokens > 0 ? min(100, round($global_month_used / $monthly_tokens * 100, 1)) : 0;
+            break;
     }
-    $ch_today_remaining = max(0, $ch_today_allowance - $ch_today_used);
 
     // 判断该渠道的水龙头状态
     $should_open = $ch_today_used < $ch_today_allowance && $ch_today_allowance > 0;
@@ -128,7 +158,6 @@ foreach ($tap_channels as $channel) {
         $stmt->execute([$desired_groups, $ch_id]);
 
         if ($should_open) {
-            // 开启：为该渠道的所有模型添加 free 组 abilities 记录
             $stmt = $newapi_pdo->prepare("SELECT models, priority, weight FROM channels WHERE id = ?");
             $stmt->execute([$ch_id]);
             $ch_info = $stmt->fetch();
@@ -154,8 +183,9 @@ foreach ($tap_channels as $channel) {
             }
 
             setState($tap_pdo, $state_key, '1');
-            writeLog($tap_pdo, 'tap_open', "渠道 #{$ch_id} 水龙头已开启", json_encode([
+            writeLog($tap_pdo, 'tap_open', "渠道 #{$ch_id} [{$ch_mode}] 水龙头已开启", json_encode([
                 'channel_id' => $ch_id,
+                'mode' => $ch_mode,
                 'today_used' => $ch_today_used,
                 'today_allowance' => $ch_today_allowance,
                 'today_remaining' => $ch_today_remaining,
@@ -163,26 +193,26 @@ foreach ($tap_channels as $channel) {
                 'sync_fix' => $currently_open && $sync_needed,
             ]));
             $any_open = true;
-            echo "[" . date('Y-m-d H:i:s') . "] 渠道 #{$ch_id} 水龙头已开启 (添加 {$abilities_added} 条 abilities)\n";
+            echo "[" . date('Y-m-d H:i:s') . "] 渠道 #{$ch_id} [{$ch_mode}] 水龙头已开启 (添加 {$abilities_added} 条 abilities)\n";
         } else {
-            // 关闭：删除该渠道的 free 组 abilities 记录
             $stmt = $newapi_pdo->prepare("DELETE FROM abilities WHERE `group` = 'free' AND channel_id = ?");
             $stmt->execute([$ch_id]);
             $abilities_removed = $stmt->rowCount();
 
             setState($tap_pdo, $state_key, '0');
-            writeLog($tap_pdo, 'tap_close', "渠道 #{$ch_id} 水龙头已关闭", json_encode([
+            writeLog($tap_pdo, 'tap_close', "渠道 #{$ch_id} [{$ch_mode}] 水龙头已关闭", json_encode([
                 'channel_id' => $ch_id,
+                'mode' => $ch_mode,
                 'today_used' => $ch_today_used,
                 'today_allowance' => $ch_today_allowance,
-                'reason' => $ch_today_allowance <= 0 ? '月度额度已耗尽' : '今日额度已用完',
+                'reason' => $ch_today_allowance <= 0 ? '额度已耗尽' : '今日额度已用完',
                 'abilities_removed' => $abilities_removed,
             ]));
             $any_closed = true;
-            echo "[" . date('Y-m-d H:i:s') . "] 渠道 #{$ch_id} 水龙头已关闭 (移除 {$abilities_removed} 条 abilities)\n";
+            echo "[" . date('Y-m-d H:i:s') . "] 渠道 #{$ch_id} [{$ch_mode}] 水龙头已关闭 (移除 {$abilities_removed} 条 abilities)\n";
         }
     } else {
-        echo "[" . date('Y-m-d H:i:s') . "] 渠道 #{$ch_id} 状态无变化 - 水龙头: " . ($currently_open ? '开启' : '关闭') . "\n";
+        echo "[" . date('Y-m-d H:i:s') . "] 渠道 #{$ch_id} [{$ch_mode}] 状态无变化 - 水龙头: " . ($currently_open ? '开启' : '关闭') . "\n";
     }
 
     // 更新该渠道的状态缓存
@@ -201,7 +231,6 @@ foreach ($tap_channels as $channel) {
 
 // ============ 更新全局状态缓存 ============
 
-// 全局 tap_open：任意渠道开启即为 1，全部关闭才为 0
 $global_tap_open = $any_open ? '1' : '0';
 setState($tap_pdo, 'tap_open', $global_tap_open);
 setState($tap_pdo, 'month_used', (string)$global_month_used);
@@ -213,7 +242,7 @@ setState($tap_pdo, 'last_check', date('Y-m-d H:i:s'));
 
 // ============ 输出摘要 ============
 
-echo "\n--- 全局摘要 ---\n";
+echo "\n--- 全局摘要 (shared 渠道) ---\n";
 echo "  月度总额: " . formatTokens($monthly_tokens) . " tokens\n";
 echo "  本月已用: " . formatTokens($global_month_used) . " tokens\n";
 echo "  月度剩余: " . formatTokens($global_remaining) . " tokens\n";

@@ -59,19 +59,24 @@ $api_site_url = env('API_SITE_URL', '');
 $monthly_tokens = envInt('MONTHLY_TOKENS', 100000000);
 
 // ============ 水龙头渠道配置 ============
-// 格式：渠道ID:月度额度:开启分组:关闭分组
-// 月度额度为 0 表示使用总额度均分
+// 格式：渠道ID:模式:额度:开启分组:关闭分组
+// 模式：shared=共享总额度均分, monthly=独立月度额度, daily=独立日额度
 $tap_channels_raw = env('TAP_CHANNELS', '');
 $tap_channels = [];
 if ($tap_channels_raw !== '') {
     foreach (explode(';', $tap_channels_raw) as $ch_str) {
-        $parts = explode(':', $ch_str, 4);
-        if (count($parts) >= 4) {
+        $parts = explode(':', $ch_str, 5);
+        if (count($parts) >= 5) {
+            $mode = $parts[1];
+            if (!in_array($mode, ['shared', 'monthly', 'daily'])) {
+                $mode = 'shared';
+            }
             $tap_channels[] = [
                 'channel_id'    => (int)$parts[0],
-                'monthly_tokens' => (int)$parts[1],
-                'open_groups'   => $parts[2],
-                'closed_groups' => $parts[3],
+                'mode'          => $mode,
+                'quota'         => (int)$parts[2],
+                'open_groups'   => $parts[3],
+                'closed_groups' => $parts[4],
             ];
         }
     }

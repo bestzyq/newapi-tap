@@ -321,6 +321,15 @@ body {
     font-size: 0.95rem;
     color: var(--text-primary);
 }
+.channel-mode {
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 0.15rem 0.5rem;
+    border-radius: 9999px;
+    background: var(--badge-install-bg);
+    color: var(--badge-install-color);
+    white-space: nowrap;
+}
 .channel-models { flex: 1; }
 .channel-models code {
     word-break: break-all;

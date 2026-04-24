@@ -31,24 +31,39 @@ function getState($tap_pdo, $key, $default = '') {
     return $result ? $result['config_value'] : $default;
 }
 
-// ============ 总体统计 ============
-$channel_ids = array_column($tap_channels, 'channel_id');
-$channel_id_list = implode(',', array_map('intval', $channel_ids));
+// ============ 总体统计（仅 shared 渠道参与月度总额） ============
+$shared_channel_ids = [];
+$all_channel_ids = [];
+foreach ($tap_channels as $ch) {
+    $all_channel_ids[] = $ch['channel_id'];
+    if ($ch['mode'] === 'shared') {
+        $shared_channel_ids[] = $ch['channel_id'];
+    }
+}
+$shared_id_list = implode(',', array_map('intval', $shared_channel_ids));
+$all_id_list = implode(',', array_map('intval', $all_channel_ids));
 
 $month_start_ts = strtotime(date('Y-m-01 00:00:00'));
-$stmt = $newapi_pdo->prepare("SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) as total FROM logs WHERE channel_id IN ($channel_id_list) AND created_at >= ?");
-$stmt->execute([$month_start_ts]);
-$month_used = (int)$stmt->fetch()['total'];
-
 $today_start_ts = strtotime(date('Y-m-d 00:00:00'));
-$stmt = $newapi_pdo->prepare("SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) as total FROM logs WHERE channel_id IN ($channel_id_list) AND created_at >= ?");
-$stmt->execute([$today_start_ts]);
-$today_used = (int)$stmt->fetch()['total'];
-
-$remaining = max(0, $monthly_tokens - $month_used);
 $days_in_month = (int)date('t');
 $day_of_month = (int)date('j');
 $days_remaining = $days_in_month - $day_of_month + 1;
+
+// 全局月度统计（仅 shared 渠道）
+if ($shared_id_list !== '') {
+    $stmt = $newapi_pdo->prepare("SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) as total FROM logs WHERE channel_id IN ($shared_id_list) AND created_at >= ?");
+    $stmt->execute([$month_start_ts]);
+    $month_used = (int)$stmt->fetch()['total'];
+
+    $stmt = $newapi_pdo->prepare("SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) as total FROM logs WHERE channel_id IN ($shared_id_list) AND created_at >= ?");
+    $stmt->execute([$today_start_ts]);
+    $today_used = (int)$stmt->fetch()['total'];
+} else {
+    $month_used = 0;
+    $today_used = 0;
+}
+
+$remaining = max(0, $monthly_tokens - $month_used);
 $today_allowance = $days_remaining > 0 ? intdiv($remaining, $days_remaining) : 0;
 $today_remaining = max(0, $today_allowance - $today_used);
 $tap_open = getState($tap_pdo, 'tap_open', '1') === '1';
@@ -61,7 +76,8 @@ $today_usage_pct = $today_allowance > 0 ? min(100, round($today_used / $today_al
 $channel_stats = [];
 foreach ($tap_channels as $ch) {
     $ch_id = $ch['channel_id'];
-    $ch_monthly = $ch['monthly_tokens'] > 0 ? $ch['monthly_tokens'] : 0;
+    $ch_mode = $ch['mode'];
+    $ch_quota = $ch['quota'];
 
     $stmt = $newapi_pdo->prepare("SELECT models FROM channels WHERE id = ?");
     $stmt->execute([$ch_id]);
@@ -75,21 +91,41 @@ foreach ($tap_channels as $ch) {
     $stmt->execute([$ch_id, $today_start_ts]);
     $ch_today_used = (int)$stmt->fetch()['total'];
 
-    if ($ch_monthly > 0) {
-        $ch_remaining = max(0, $ch_monthly - $ch_month_used);
-        $ch_today_allowance = $days_remaining > 0 ? intdiv($ch_remaining, $days_remaining) : 0;
-    } else {
-        $ch_monthly = 0;
-        $ch_remaining = 0;
-        $ch_today_allowance = 0;
-    }
-    $ch_today_remaining = max(0, $ch_today_allowance - $ch_today_used);
+    switch ($ch_mode) {
+        case 'daily':
+            $ch_today_allowance = $ch_quota;
+            $ch_today_remaining = max(0, $ch_today_allowance - $ch_today_used);
+            $ch_monthly = 0;
+            $ch_remaining = 0;
+            $ch_month_pct = 0;
+            $ch_today_pct = $ch_today_allowance > 0 ? min(100, round($ch_today_used / $ch_today_allowance * 100, 1)) : 0;
+            break;
 
-    $ch_month_pct = $ch_monthly > 0 ? min(100, round($ch_month_used / $ch_monthly * 100, 1)) : 0;
-    $ch_today_pct = $ch_today_allowance > 0 ? min(100, round($ch_today_used / $ch_today_allowance * 100, 1)) : 0;
+        case 'monthly':
+            $ch_monthly = $ch_quota;
+            $ch_remaining = max(0, $ch_monthly - $ch_month_used);
+            $ch_today_allowance = $days_remaining > 0 ? intdiv($ch_remaining, $days_remaining) : 0;
+            $ch_today_remaining = max(0, $ch_today_allowance - $ch_today_used);
+            $ch_month_pct = $ch_monthly > 0 ? min(100, round($ch_month_used / $ch_monthly * 100, 1)) : 0;
+            $ch_today_pct = $ch_today_allowance > 0 ? min(100, round($ch_today_used / $ch_today_allowance * 100, 1)) : 0;
+            break;
+
+        case 'shared':
+        default:
+            $ch_monthly = $monthly_tokens;
+            $ch_remaining = $remaining;
+            $ch_today_allowance = $today_allowance;
+            $ch_today_used = $today_used;
+            $ch_month_used = $month_used;
+            $ch_today_remaining = $today_remaining;
+            $ch_month_pct = $month_usage_pct;
+            $ch_today_pct = $today_usage_pct;
+            break;
+    }
 
     $channel_stats[] = [
         'channel_id'      => $ch_id,
+        'mode'            => $ch_mode,
         'models'          => $models,
         'monthly_tokens'  => $ch_monthly,
         'month_used'      => $ch_month_used,
@@ -107,17 +143,19 @@ $stmt = $tap_pdo->prepare("SELECT * FROM tap_logs ORDER BY created_at DESC LIMIT
 $stmt->execute();
 $recent_logs = $stmt->fetchAll();
 
-// 每日用量趋势（最近7天）
+// 每日用量趋势（最近7天，所有渠道）
 $daily_stats = [];
 for ($i = 6; $i >= 0; $i--) {
     $date = date('Y-m-d', strtotime("-$i days"));
     $day_start = strtotime("$date 00:00:00");
     $day_end = strtotime("$date 23:59:59");
-    $stmt = $newapi_pdo->prepare("SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) as total FROM logs WHERE channel_id IN ($channel_id_list) AND created_at >= ? AND created_at <= ?");
+    $stmt = $newapi_pdo->prepare("SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) as total FROM logs WHERE channel_id IN ($all_id_list) AND created_at >= ? AND created_at <= ?");
     $stmt->execute([$day_start, $day_end]);
     $day_total = (int)$stmt->fetch()['total'];
     $daily_stats[] = ['date' => $date, 'total' => $day_total];
 }
+
+$mode_labels = ['shared' => '共享月度', 'monthly' => '独立月度', 'daily' => '独立日额'];
 
 function showLoginPage() {
 ?>
@@ -181,7 +219,8 @@ function showLoginPage() {
             <span class="dot"></span>页面每 30 秒自动刷新 &nbsp;|&nbsp; 上次检查: <?= htmlspecialchars($last_check) ?>
         </div>
 
-        <!-- Monthly Stats (Overall) -->
+        <?php if ($shared_id_list !== ''): ?>
+        <!-- Monthly Stats (shared channels) -->
         <div class="cards">
             <div class="card">
                 <div class="label">月度总额度</div>
@@ -224,6 +263,7 @@ function showLoginPage() {
                 </div>
             </div>
         </div>
+        <?php endif; ?>
 
         <!-- Daily Chart -->
         <div class="section">
@@ -251,9 +291,34 @@ function showLoginPage() {
             <div class="channel-card">
                 <div class="channel-card-header">
                     <span class="channel-id">#<?= $cs['channel_id'] ?></span>
+                    <span class="channel-mode"><?= $mode_labels[$cs['mode']] ?? $cs['mode'] ?></span>
                     <span class="channel-models"><code class="code-blue"><?= htmlspecialchars($cs['models']) ?></code></span>
                 </div>
-                <?php if ($cs['monthly_tokens'] > 0): ?>
+                <?php if ($cs['mode'] === 'daily'): ?>
+                <div class="channel-card-stats">
+                    <div class="channel-stat">
+                        <span class="channel-stat-label">日额度</span>
+                        <span class="channel-stat-value"><?= formatTokens($cs['today_allowance']) ?></span>
+                    </div>
+                    <div class="channel-stat">
+                        <span class="channel-stat-label">今日已用</span>
+                        <span class="channel-stat-value <?= $cs['today_pct'] >= 100 ? 'danger' : 'success' ?>"><?= formatTokens($cs['today_used']) ?></span>
+                    </div>
+                    <div class="channel-stat">
+                        <span class="channel-stat-label">今日剩余</span>
+                        <span class="channel-stat-value info"><?= formatTokens($cs['today_remaining']) ?></span>
+                    </div>
+                </div>
+                <div class="progress-wrap">
+                    <div class="progress-bar">
+                        <div class="progress-fill <?= $cs['today_pct'] > 80 ? 'red' : ($cs['today_pct'] > 50 ? 'yellow' : 'green') ?>" style="width: <?= $cs['today_pct'] ?>%"></div>
+                    </div>
+                    <div class="progress-text">
+                        <span>今日已用 <?= $cs['today_pct'] ?>%</span>
+                        <span>剩余 <?= formatTokens($cs['today_remaining']) ?></span>
+                    </div>
+                </div>
+                <?php elseif ($cs['mode'] === 'monthly'): ?>
                 <div class="channel-card-stats">
                     <div class="channel-stat">
                         <span class="channel-stat-label">月度额度</span>

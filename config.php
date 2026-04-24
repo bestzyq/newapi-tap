@@ -16,7 +16,7 @@ if (!file_exists($env_file)) {
 $env_lines = file($env_file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
 foreach ($env_lines as $line) {
     $line = trim($line);
-    if ($line === '' || str_starts_with($line, '#')) {
+    if ($line === '' || $line[0] === '#') {
         continue;
     }
     if (strpos($line, '=') === false) {

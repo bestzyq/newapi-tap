@@ -6,7 +6,7 @@
  */
 
 // ============ 数据库配置 ============
-// newapi 数据库（查询 logs 表统计用量，读写 channels 表控制水龙头）
+// newapi 数据库（查询 logs 表统计用量，读写 channels/abilities 表控制水龙头）
 $newapi_db_host = 'localhost';
 $newapi_db_user = 'newapi';
 $newapi_db_pass = 'newapi';
@@ -26,6 +26,7 @@ $monthly_tokens = 100000000; // 1亿 token
 // 支持多渠道配置，方便扩展
 // open_groups: 水龙头开启时的分组（包含免费组）
 // closed_groups: 水龙头关闭时的分组（不含免费组）
+// abilities 参数（enabled/priority/weight/tag）自动从 channels 表读取，无需配置
 $tap_channels = [
     [
         'channel_id'    => 35,
@@ -56,8 +57,8 @@ $access_key = '';  // 例如：'my-secret-key-123'
 // ============ 以下为内部函数，一般无需修改 ============
 
 /**
- * 获取 newapi 数据库连接（只读）
- * 用于查询 quota_data 和 channels 表
+ * 获取 newapi 数据库连接
+ * 用于查询 logs、channels、abilities 表
  */
 function getNewapiDB() {
     global $newapi_db_host, $newapi_db_user, $newapi_db_pass, $newapi_db_name;

@@ -16,7 +16,7 @@
  */
 require_once __DIR__ . '/config.php';
 
-$newapi_pdo = getNewapiDB();  // 读 logs，写 channels
+$newapi_pdo = getNewapiDB();  // 读 logs，写 channels/abilities
 $tap_pdo = getTapDB();        // 读写状态和日志
 
 // ============ 辅助函数 ============
@@ -108,31 +108,69 @@ foreach ($tap_channels as $channel) {
 if ($sync_needed || $should_open !== $currently_open) {
     // 需要切换状态或同步分组
     foreach ($tap_channels as $channel) {
+        // 更新 channels 表分组
         $stmt = $newapi_pdo->prepare("UPDATE channels SET `group` = ? WHERE id = ?");
         $stmt->execute([$channel[$desired_groups], $channel['channel_id']]);
     }
 
+    // 更新 abilities 表
     if ($should_open) {
+        // 开启：为每个渠道的所有模型添加 free 组 abilities 记录
+        // enabled/priority/weight 自动从 channels 表读取
+        $abilities_added = 0;
+        foreach ($tap_channels as $channel) {
+            // 从 channels 表读取模型列表和优先级等参数
+            $stmt = $newapi_pdo->prepare("SELECT models, priority, weight FROM channels WHERE id = ?");
+            $stmt->execute([$channel['channel_id']]);
+            $ch_info = $stmt->fetch();
+            $models_str = $ch_info['models'] ?? '';
+            $ch_priority = (int)($ch_info['priority'] ?? 0);
+            $ch_weight = (int)($ch_info['weight'] ?? 0);
+            $models = array_filter(array_map('trim', explode(',', $models_str)));
+
+            foreach ($models as $model) {
+                $stmt = $newapi_pdo->prepare(
+                    "INSERT INTO abilities (`group`, model, channel_id, enabled, priority, weight, tag) 
+                     VALUES ('free', ?, ?, 1, ?, ?, '') 
+                     ON DUPLICATE KEY UPDATE enabled = VALUES(enabled), priority = VALUES(priority), weight = VALUES(weight), tag = VALUES(tag)"
+                );
+                $stmt->execute([
+                    $model,
+                    $channel['channel_id'],
+                    $ch_priority,
+                    $ch_weight,
+                ]);
+                $abilities_added++;
+            }
+        }
+
         setState($tap_pdo, 'tap_open', '1');
         writeLog($tap_pdo, 'tap_open', '水龙头已开启', json_encode([
             'today_used' => $today_used,
             'today_allowance' => $today_allowance,
             'today_remaining' => $today_remaining,
             'channels' => $channel_ids,
-            'sync_fix' => $currently_open && $sync_needed, // 标记是否为同步修复
+            'abilities_added' => $abilities_added,
+            'sync_fix' => $currently_open && $sync_needed,
         ]));
         $action_taken = true;
-        echo "[" . date('Y-m-d H:i:s') . "] 水龙头已开启\n";
+        echo "[" . date('Y-m-d H:i:s') . "] 水龙头已开启 (添加 {$abilities_added} 条 abilities)\n";
     } else {
+        // 关闭：删除配置渠道的 free 组 abilities 记录
+        $stmt = $newapi_pdo->prepare("DELETE FROM abilities WHERE `group` = 'free' AND channel_id IN ($channel_id_list)");
+        $stmt->execute();
+        $abilities_removed = $stmt->rowCount();
+
         setState($tap_pdo, 'tap_open', '0');
         writeLog($tap_pdo, 'tap_close', '水龙头已关闭', json_encode([
             'today_used' => $today_used,
             'today_allowance' => $today_allowance,
             'reason' => $today_allowance <= 0 ? '月度额度已耗尽' : '今日额度已用完',
             'channels' => $channel_ids,
+            'abilities_removed' => $abilities_removed,
         ]));
         $action_taken = true;
-        echo "[" . date('Y-m-d H:i:s') . "] 水龙头已关闭\n";
+        echo "[" . date('Y-m-d H:i:s') . "] 水龙头已关闭 (移除 {$abilities_removed} 条 abilities)\n";
     }
 }
 

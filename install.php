@@ -113,14 +113,36 @@ try {
     // 验证渠道是否存在
     echo "\n--- 验证渠道配置 ---\n";
     foreach ($tap_channels as $ch) {
-        $stmt = $newapi_pdo->prepare("SELECT id, `group` FROM channels WHERE id = ?");
+        $stmt = $newapi_pdo->prepare("SELECT id, `group`, models FROM channels WHERE id = ?");
         $stmt->execute([$ch['channel_id']]);
         $row = $stmt->fetch();
         if ($row) {
-            echo "[✓] 渠道 #{$ch['channel_id']} 存在，当前分组: {$row['group']}\n";
+            $model_count = count(array_filter(explode(',', $row['models'])));
+            echo "[✓] 渠道 #{$ch['channel_id']} 存在，当前分组: {$row['group']}，模型数: {$model_count}\n";
         } else {
             echo "[✗] 渠道 #{$ch['channel_id']} 不存在！请检查配置\n";
         }
+    }
+
+    // 验证 abilities 表
+    echo "\n--- 验证 abilities 表 ---\n";
+    $stmt = $newapi_pdo->query("SHOW TABLES LIKE 'abilities'");
+    if ($stmt->rowCount() > 0) {
+        echo "[✓] abilities 表存在\n";
+        $stmt = $newapi_pdo->query("DESCRIBE abilities");
+        $fields = [];
+        while ($row = $stmt->fetch()) {
+            $fields[] = $row['Field'];
+        }
+        echo "    字段: " . implode(', ', $fields) . "\n";
+        // 检查当前 free 组记录数
+        $channel_ids = array_column($tap_channels, 'channel_id');
+        $channel_id_list = implode(',', array_map('intval', $channel_ids));
+        $stmt = $newapi_pdo->query("SELECT COUNT(*) as cnt FROM abilities WHERE `group` = 'free' AND channel_id IN ($channel_id_list)");
+        $free_count = $stmt->fetch()['cnt'];
+        echo "    当前 free 组 abilities 记录: {$free_count} 条\n";
+    } else {
+        echo "[✗] abilities 表不存在！请确认 newapi 版本\n";
     }
 } catch (PDOException $e) {
     echo "[✗] 连接 newapi 数据库失败: " . $e->getMessage() . "\n";
@@ -130,7 +152,7 @@ try {
 echo "\n--- 权限检查 ---\n";
 $tap_db_user_safe = $tap_db_user; // for display
 echo "[i] newapi_tap 库: $tap_db_user_safe@{$tap_db_host} (需要 CREATE/INSERT/UPDATE/SELECT/DELETE)\n";
-echo "[i] newapi 库: $newapi_db_user@{$newapi_db_host} (需要 SELECT + UPDATE channels)\n";
+echo "[i] newapi 库: $newapi_db_user@{$newapi_db_host} (需要 SELECT logs, SELECT/UPDATE channels, SELECT/INSERT/DELETE abilities)\n";
 
 echo "\n=== 安装完成 ===\n";
 echo "请设置定时任务，每5分钟执行一次 cron.php：\n\n";

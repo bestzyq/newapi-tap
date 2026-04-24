@@ -58,6 +58,10 @@ $last_check = getState($tap_pdo, 'last_check', '从未');
 $month_usage_pct = $monthly_tokens > 0 ? min(100, round($month_used / $monthly_tokens * 100, 1)) : 0;
 $today_usage_pct = $today_allowance > 0 ? min(100, round($today_used / $today_allowance * 100, 1)) : 0;
 
+// 获取 free 组 abilities 数量
+$stmt = $newapi_pdo->query("SELECT COUNT(*) as cnt FROM abilities WHERE `group` = 'free' AND channel_id IN ($channel_id_list)");
+$free_abilities_count = (int)$stmt->fetch()['cnt'];
+
 // 获取最近日志
 $stmt = $tap_pdo->prepare("SELECT * FROM tap_logs ORDER BY created_at DESC LIMIT 20");
 $stmt->execute();
@@ -359,6 +363,7 @@ function showLoginPage() {
                             <th style="padding: 0.5rem; text-align: left; color: #94a3b8;">开启分组</th>
                             <th style="padding: 0.5rem; text-align: left; color: #94a3b8;">关闭分组</th>
                             <th style="padding: 0.5rem; text-align: left; color: #94a3b8;">当前分组</th>
+                            <th style="padding: 0.5rem; text-align: left; color: #94a3b8;">free abilities</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -366,12 +371,16 @@ function showLoginPage() {
                             $stmt = $newapi_pdo->prepare("SELECT `group` FROM channels WHERE id = ?");
                             $stmt->execute([$ch['channel_id']]);
                             $current_group = $stmt->fetchColumn() ?: '未知';
+                            $stmt = $newapi_pdo->prepare("SELECT COUNT(*) as cnt FROM abilities WHERE `group` = 'free' AND channel_id = ?");
+                            $stmt->execute([$ch['channel_id']]);
+                            $ch_free_count = (int)$stmt->fetch()['cnt'];
                         ?>
                         <tr style="border-bottom: 1px solid #1e293b;">
                             <td style="padding: 0.5rem;"><?= htmlspecialchars($ch['name']) ?> (#<?= $ch['channel_id'] ?>)</td>
                             <td style="padding: 0.5rem;"><code style="color: #6ee7b7; font-size: 0.8rem;"><?= htmlspecialchars($ch['open_groups']) ?></code></td>
                             <td style="padding: 0.5rem;"><code style="color: #fca5a5; font-size: 0.8rem;"><?= htmlspecialchars($ch['closed_groups']) ?></code></td>
                             <td style="padding: 0.5rem;"><code style="color: #93c5fd; font-size: 0.8rem;"><?= htmlspecialchars($current_group) ?></code></td>
+                            <td style="padding: 0.5rem;"><span style="color: <?= $ch_free_count > 0 ? '#6ee7b7' : '#fca5a5' ?>;"><?= $ch_free_count ?> 条</span></td>
                         </tr>
                         <?php endforeach; ?>
                     </tbody>

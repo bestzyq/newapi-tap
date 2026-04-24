@@ -15,7 +15,7 @@
 
 | 数据库 | 用途 | 表 |
 |--------|------|-----|
-| `newapi` | newapi 主库 | `logs`（读用量）, `channels`（写分组） |
+| `newapi` | newapi 主库 | `logs`（读用量）, `channels`（写分组+读模型）, `abilities`（读写 free 组） |
 | `newapi_tap` | TAP 自身数据 | `tap_state`, `tap_logs` |
 
 `logs` 表关键字段：`id, user_id, created_at(Unix时间戳), prompt_tokens, completion_tokens, channel_id, ...`
@@ -128,6 +128,16 @@ $tap_channels = [
     ],
 ];
 ```
+
+开水龙头时，系统会：
+1. 更新 `channels` 表的 `group` 字段（添加 `free`）
+2. 读取渠道的 `models` 字段，为每个模型在 `abilities` 表插入 `free` 组记录
+
+关水龙头时，系统会：
+1. 更新 `channels` 表的 `group` 字段（移除 `free`）
+2. 删除 `abilities` 表中对应渠道的 `free` 组记录
+
+`abilities` 表插入参数可在渠道配置中调整（`abilities_enabled`, `abilities_priority`, `abilities_weight`, `abilities_tag`）。
 
 ## 注意事项
 

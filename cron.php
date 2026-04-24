@@ -152,8 +152,8 @@ foreach ($tap_channels as $channel) {
 
     $sync_needed = ($actual_group !== $desired_groups);
 
-    if ($sync_needed || $should_open !== $currently_open) {
-        // 更新 channels 表分组
+    if ($should_open !== $currently_open) {
+        // 状态切换：开启 → 关闭 或 关闭 → 开启
         $stmt = $newapi_pdo->prepare("UPDATE channels SET `group` = ? WHERE id = ?");
         $stmt->execute([$desired_groups, $ch_id]);
 
@@ -190,7 +190,6 @@ foreach ($tap_channels as $channel) {
                 'today_allowance' => $ch_today_allowance,
                 'today_remaining' => $ch_today_remaining,
                 'abilities_added' => $abilities_added,
-                'sync_fix' => $currently_open && $sync_needed,
             ]));
             $any_open = true;
             echo "[" . date('Y-m-d H:i:s') . "] 渠道 #{$ch_id} [{$ch_mode}] 水龙头已开启 (添加 {$abilities_added} 条 abilities)\n";
@@ -210,6 +209,53 @@ foreach ($tap_channels as $channel) {
             ]));
             $any_closed = true;
             echo "[" . date('Y-m-d H:i:s') . "] 渠道 #{$ch_id} [{$ch_mode}] 水龙头已关闭 (移除 {$abilities_removed} 条 abilities)\n";
+        }
+    } elseif ($sync_needed) {
+        // 状态未变但分组需要同步
+        $stmt = $newapi_pdo->prepare("UPDATE channels SET `group` = ? WHERE id = ?");
+        $stmt->execute([$desired_groups, $ch_id]);
+
+        if ($should_open) {
+            $stmt = $newapi_pdo->prepare("SELECT models, priority, weight FROM channels WHERE id = ?");
+            $stmt->execute([$ch_id]);
+            $ch_info = $stmt->fetch();
+            $models_str = $ch_info['models'] ?? '';
+            $ch_priority = (int)($ch_info['priority'] ?? 0);
+            $ch_weight = (int)($ch_info['weight'] ?? 0);
+            $models = array_filter(array_map('trim', explode(',', $models_str)));
+
+            foreach ($models as $model) {
+                $stmt = $newapi_pdo->prepare(
+                    "INSERT INTO abilities (`group`, model, channel_id, enabled, priority, weight, tag) 
+                     VALUES ('free', ?, ?, 1, ?, ?, '') 
+                     ON DUPLICATE KEY UPDATE enabled = VALUES(enabled), priority = VALUES(priority), weight = VALUES(weight), tag = VALUES(tag)"
+                );
+                $stmt->execute([
+                    $model,
+                    $ch_id,
+                    $ch_priority,
+                    $ch_weight,
+                ]);
+            }
+
+            writeLog($tap_pdo, 'tap_sync', "渠道 #{$ch_id} [{$ch_mode}] 分组同步", json_encode([
+                'channel_id' => $ch_id,
+                'mode' => $ch_mode,
+                'old_group' => $actual_group,
+                'new_group' => $desired_groups,
+            ]));
+            echo "[" . date('Y-m-d H:i:s') . "] 渠道 #{$ch_id} [{$ch_mode}] 分组同步: {$actual_group} → {$desired_groups}\n";
+        } else {
+            $stmt = $newapi_pdo->prepare("DELETE FROM abilities WHERE `group` = 'free' AND channel_id = ?");
+            $stmt->execute([$ch_id]);
+
+            writeLog($tap_pdo, 'tap_sync', "渠道 #{$ch_id} [{$ch_mode}] 分组同步", json_encode([
+                'channel_id' => $ch_id,
+                'mode' => $ch_mode,
+                'old_group' => $actual_group,
+                'new_group' => $desired_groups,
+            ]));
+            echo "[" . date('Y-m-d H:i:s') . "] 渠道 #{$ch_id} [{$ch_mode}] 分组同步: {$actual_group} → {$desired_groups}\n";
         }
     } else {
         echo "[" . date('Y-m-d H:i:s') . "] 渠道 #{$ch_id} [{$ch_mode}] 状态无变化 - 水龙头: " . ($currently_open ? '开启' : '关闭') . "\n";

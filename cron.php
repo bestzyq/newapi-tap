@@ -88,38 +88,52 @@ $today_remaining = max(0, $today_allowance - $today_used);
 $should_open = $today_used < $today_allowance && $today_allowance > 0;
 $currently_open = getState($tap_pdo, 'tap_open', '1') === '1';
 
-$action_taken = false;
+// 确定期望的分组
+$desired_groups = $should_open ? 'open_groups' : 'closed_groups';
 
-if ($should_open && !$currently_open) {
-    // 开启水龙头
+// 检查每个渠道的实际分组是否与期望一致，不一致则同步
+$action_taken = false;
+$sync_needed = false;
+
+foreach ($tap_channels as $channel) {
+    $stmt = $newapi_pdo->prepare("SELECT `group` FROM channels WHERE id = ?");
+    $stmt->execute([$channel['channel_id']]);
+    $actual_group = $stmt->fetchColumn() ?: '';
+    if ($actual_group !== $channel[$desired_groups]) {
+        $sync_needed = true;
+        break;
+    }
+}
+
+if ($sync_needed || $should_open !== $currently_open) {
+    // 需要切换状态或同步分组
     foreach ($tap_channels as $channel) {
         $stmt = $newapi_pdo->prepare("UPDATE channels SET `group` = ? WHERE id = ?");
-        $stmt->execute([$channel['open_groups'], $channel['channel_id']]);
+        $stmt->execute([$channel[$desired_groups], $channel['channel_id']]);
     }
-    setState($tap_pdo, 'tap_open', '1');
-    writeLog($tap_pdo, 'tap_open', '水龙头已开启', json_encode([
-        'today_used' => $today_used,
-        'today_allowance' => $today_allowance,
-        'today_remaining' => $today_remaining,
-        'channels' => $channel_ids,
-    ]));
-    $action_taken = true;
-    echo "[" . date('Y-m-d H:i:s') . "] 水龙头已开启\n";
-} elseif (!$should_open && $currently_open) {
-    // 关闭水龙头
-    foreach ($tap_channels as $channel) {
-        $stmt = $newapi_pdo->prepare("UPDATE channels SET `group` = ? WHERE id = ?");
-        $stmt->execute([$channel['closed_groups'], $channel['channel_id']]);
+
+    if ($should_open) {
+        setState($tap_pdo, 'tap_open', '1');
+        writeLog($tap_pdo, 'tap_open', '水龙头已开启', json_encode([
+            'today_used' => $today_used,
+            'today_allowance' => $today_allowance,
+            'today_remaining' => $today_remaining,
+            'channels' => $channel_ids,
+            'sync_fix' => $currently_open && $sync_needed, // 标记是否为同步修复
+        ]));
+        $action_taken = true;
+        echo "[" . date('Y-m-d H:i:s') . "] 水龙头已开启\n";
+    } else {
+        setState($tap_pdo, 'tap_open', '0');
+        writeLog($tap_pdo, 'tap_close', '水龙头已关闭', json_encode([
+            'today_used' => $today_used,
+            'today_allowance' => $today_allowance,
+            'reason' => $today_allowance <= 0 ? '月度额度已耗尽' : '今日额度已用完',
+            'channels' => $channel_ids,
+        ]));
+        $action_taken = true;
+        echo "[" . date('Y-m-d H:i:s') . "] 水龙头已关闭\n";
     }
-    setState($tap_pdo, 'tap_open', '0');
-    writeLog($tap_pdo, 'tap_close', '水龙头已关闭', json_encode([
-        'today_used' => $today_used,
-        'today_allowance' => $today_allowance,
-        'reason' => $today_allowance <= 0 ? '月度额度已耗尽' : '今日额度已用完',
-        'channels' => $channel_ids,
-    ]));
-    $action_taken = true;
-    echo "[" . date('Y-m-d H:i:s') . "] 水龙头已关闭\n";
 }
 
 // ============ 更新状态缓存 ============

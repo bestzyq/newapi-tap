@@ -50,6 +50,10 @@ date_default_timezone_set('Asia/Shanghai');
 // ============ 日志保留天数 ============
 $log_retention_days = 90;
 
+// ============ API 站点地址 ============
+// 用于"返回API站"按钮的链接地址
+$api_site_url = 'https://your-api-site.com';
+
 // ============ 访问密钥（可选，为空则不验证） ============
 // 建议设置一个密钥以防止未授权访问仪表盘
 $access_key = '';  // 例如：'my-secret-key-123'

@@ -113,8 +113,13 @@ function showLoginPage() {
     <div class="container">
         <!-- Header -->
         <div class="header">
-            <h1>NewAPI-TAP</h1>
-            <div class="subtitle">免费额度水龙头控制系统</div>
+            <div class="header-row">
+                <div>
+                    <h1>NewAPI-TAP</h1>
+                    <div class="subtitle">免费额度水龙头控制系统</div>
+                </div>
+                <a href="<?= htmlspecialchars($api_site_url) ?>" class="btn-back" target="_blank">返回API站</a>
+            </div>
         </div>
 
         <!-- Tap Status -->
@@ -197,23 +202,19 @@ function showLoginPage() {
                 <table class="channel-table">
                     <thead>
                         <tr>
-                            <th>渠道</th>
-                            <th>开启分组</th>
-                            <th>关闭分组</th>
-                            <th>当前分组</th>
+                            <th>渠道编号</th>
+                            <th>模型名称</th>
                         </tr>
                     </thead>
                     <tbody>
                         <?php foreach ($tap_channels as $ch): 
-                            $stmt = $newapi_pdo->prepare("SELECT `group` FROM channels WHERE id = ?");
+                            $stmt = $newapi_pdo->prepare("SELECT models FROM channels WHERE id = ?");
                             $stmt->execute([$ch['channel_id']]);
-                            $current_group = $stmt->fetchColumn() ?: '未知';
+                            $models = $stmt->fetchColumn() ?: '未知';
                         ?>
                         <tr>
-                            <td><?= htmlspecialchars($ch['name']) ?> (#<?= $ch['channel_id'] ?>)</td>
-                            <td><code class="code-green"><?= htmlspecialchars($ch['open_groups']) ?></code></td>
-                            <td><code class="code-red"><?= htmlspecialchars($ch['closed_groups']) ?></code></td>
-                            <td><code class="code-blue"><?= htmlspecialchars($current_group) ?></code></td>
+                            <td>#<?= $ch['channel_id'] ?></td>
+                            <td><code class="code-blue"><?= htmlspecialchars($models) ?></code></td>
                         </tr>
                         <?php endforeach; ?>
                     </tbody>

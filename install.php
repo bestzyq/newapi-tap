@@ -5,7 +5,7 @@
  */
 require_once __DIR__ . '/config.php';
 
-echo "=== NewAPI-TAP 安装程序 ===\n\n";
+echo "=== {$site_name} 安装程序 ===\n\n";
 
 // Step 1: 创建 newapi_tap 数据库
 try {
@@ -64,6 +64,17 @@ $defaults = [
     'last_check'      => date('Y-m-d H:i:s'),
 ];
 
+// 为每个渠道初始化状态
+foreach ($tap_channels as $ch) {
+    $ch_id = $ch['channel_id'];
+    $defaults["tap_open_{$ch_id}"] = '1';
+    $defaults["month_used_{$ch_id}"] = '0';
+    $defaults["today_used_{$ch_id}"] = '0';
+    $defaults["today_allowance_{$ch_id}"] = '0';
+    $defaults["today_remaining_{$ch_id}"] = '0';
+    $defaults["remaining_{$ch_id}"] = (string)($ch['monthly_tokens'] > 0 ? $ch['monthly_tokens'] : $monthly_tokens);
+}
+
 $stmt = $pdo->prepare(
     "INSERT INTO tap_state (config_key, config_value) VALUES (?, ?) 
      ON DUPLICATE KEY UPDATE config_value = IF(config_value = '', VALUES(config_value), config_value)"
@@ -91,14 +102,12 @@ try {
     $stmt = $newapi_pdo->query("SHOW TABLES LIKE 'logs'");
     if ($stmt->rowCount() > 0) {
         echo "[✓] logs 表存在\n";
-        // 查看关键字段
         $stmt = $newapi_pdo->query("DESCRIBE logs");
         $fields = [];
         while ($row = $stmt->fetch()) {
             $fields[] = $row['Field'];
         }
         echo "    字段: " . implode(', ', $fields) . "\n";
-        // 验证必要字段
         $required = ['channel_id', 'prompt_tokens', 'completion_tokens', 'created_at'];
         $missing = array_diff($required, $fields);
         if (empty($missing)) {
@@ -118,7 +127,8 @@ try {
         $row = $stmt->fetch();
         if ($row) {
             $model_count = count(array_filter(explode(',', $row['models'])));
-            echo "[✓] 渠道 #{$ch['channel_id']} 存在，当前分组: {$row['group']}，模型数: {$model_count}\n";
+            $quota_info = $ch['monthly_tokens'] > 0 ? formatTokens($ch['monthly_tokens']) . ' tokens/月' : '使用总额度均分';
+            echo "[✓] 渠道 #{$ch['channel_id']} 存在，当前分组: {$row['group']}，模型数: {$model_count}，额度: {$quota_info}\n";
         } else {
             echo "[✗] 渠道 #{$ch['channel_id']} 不存在！请检查配置\n";
         }
@@ -135,7 +145,6 @@ try {
             $fields[] = $row['Field'];
         }
         echo "    字段: " . implode(', ', $fields) . "\n";
-        // 检查当前 free 组记录数
         $channel_ids = array_column($tap_channels, 'channel_id');
         $channel_id_list = implode(',', array_map('intval', $channel_ids));
         $stmt = $newapi_pdo->query("SELECT COUNT(*) as cnt FROM abilities WHERE `group` = 'free' AND channel_id IN ($channel_id_list)");
@@ -150,8 +159,7 @@ try {
 
 // Step 7: 检查数据库用户权限
 echo "\n--- 权限检查 ---\n";
-$tap_db_user_safe = $tap_db_user; // for display
-echo "[i] newapi_tap 库: $tap_db_user_safe@{$tap_db_host} (需要 CREATE/INSERT/UPDATE/SELECT/DELETE)\n";
+echo "[i] newapi_tap 库: $tap_db_user@{$tap_db_host} (需要 CREATE/INSERT/UPDATE/SELECT/DELETE)\n";
 echo "[i] newapi 库: $newapi_db_user@{$newapi_db_host} (需要 SELECT logs, SELECT/UPDATE channels, SELECT/INSERT/DELETE abilities)\n";
 
 echo "\n=== 安装完成 ===\n";

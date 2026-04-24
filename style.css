@@ -300,7 +300,63 @@ body {
 .log-action.month_reset { background: var(--badge-month-reset-bg); color: var(--badge-month-reset-color); }
 .log-msg { color: var(--log-msg-color); flex: 1; }
 
-/* Channel Table */
+/* Channel Cards */
+.channel-card {
+    background: var(--bg-body);
+    border: 1px solid var(--border-card);
+    border-radius: 8px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 0.75rem;
+}
+.channel-card:last-child { margin-bottom: 0; }
+.channel-card-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+}
+.channel-id {
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: var(--text-primary);
+}
+.channel-models { flex: 1; }
+.channel-models code {
+    word-break: break-all;
+    font-size: 0.8rem;
+}
+.channel-card-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+.channel-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+.channel-stat-label {
+    font-size: 0.7rem;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+.channel-stat-value {
+    font-size: 1rem;
+    font-weight: 700;
+}
+.channel-stat-value.warning { color: #f59e0b; }
+.channel-stat-value.info { color: #3b82f6; }
+.channel-stat-value.danger { color: #ef4444; }
+.channel-stat-value.success { color: #10b981; }
+.channel-no-quota {
+    font-size: 0.75rem;
+    color: var(--text-tertiary);
+    font-style: italic;
+}
+
+/* Channel Table (legacy) */
 .channel-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
 .channel-table thead tr { border-bottom: 1px solid var(--table-header-border); }
 .channel-table th { padding: 0.5rem; text-align: left; color: var(--table-header-color); }

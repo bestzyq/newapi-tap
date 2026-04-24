@@ -31,7 +31,7 @@ function getState($tap_pdo, $key, $default = '') {
     return $result ? $result['config_value'] : $default;
 }
 
-// 实时计算（从 logs 查询配置渠道的用量，确保数据准确）
+// ============ 总体统计 ============
 $channel_ids = array_column($tap_channels, 'channel_id');
 $channel_id_list = implode(',', array_map('intval', $channel_ids));
 
@@ -54,9 +54,53 @@ $today_remaining = max(0, $today_allowance - $today_used);
 $tap_open = getState($tap_pdo, 'tap_open', '1') === '1';
 $last_check = getState($tap_pdo, 'last_check', '从未');
 
-// 月度使用百分比
 $month_usage_pct = $monthly_tokens > 0 ? min(100, round($month_used / $monthly_tokens * 100, 1)) : 0;
 $today_usage_pct = $today_allowance > 0 ? min(100, round($today_used / $today_allowance * 100, 1)) : 0;
+
+// ============ 分渠道统计 ============
+$channel_stats = [];
+foreach ($tap_channels as $ch) {
+    $ch_id = $ch['channel_id'];
+    $ch_monthly = $ch['monthly_tokens'] > 0 ? $ch['monthly_tokens'] : 0;
+
+    $stmt = $newapi_pdo->prepare("SELECT models FROM channels WHERE id = ?");
+    $stmt->execute([$ch_id]);
+    $models = $stmt->fetchColumn() ?: '未知';
+
+    $stmt = $newapi_pdo->prepare("SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) as total FROM logs WHERE channel_id = ? AND created_at >= ?");
+    $stmt->execute([$ch_id, $month_start_ts]);
+    $ch_month_used = (int)$stmt->fetch()['total'];
+
+    $stmt = $newapi_pdo->prepare("SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) as total FROM logs WHERE channel_id = ? AND created_at >= ?");
+    $stmt->execute([$ch_id, $today_start_ts]);
+    $ch_today_used = (int)$stmt->fetch()['total'];
+
+    if ($ch_monthly > 0) {
+        $ch_remaining = max(0, $ch_monthly - $ch_month_used);
+        $ch_today_allowance = $days_remaining > 0 ? intdiv($ch_remaining, $days_remaining) : 0;
+    } else {
+        $ch_monthly = 0;
+        $ch_remaining = 0;
+        $ch_today_allowance = 0;
+    }
+    $ch_today_remaining = max(0, $ch_today_allowance - $ch_today_used);
+
+    $ch_month_pct = $ch_monthly > 0 ? min(100, round($ch_month_used / $ch_monthly * 100, 1)) : 0;
+    $ch_today_pct = $ch_today_allowance > 0 ? min(100, round($ch_today_used / $ch_today_allowance * 100, 1)) : 0;
+
+    $channel_stats[] = [
+        'channel_id'      => $ch_id,
+        'models'          => $models,
+        'monthly_tokens'  => $ch_monthly,
+        'month_used'      => $ch_month_used,
+        'remaining'       => $ch_remaining,
+        'month_pct'       => $ch_month_pct,
+        'today_allowance' => $ch_today_allowance,
+        'today_used'      => $ch_today_used,
+        'today_remaining' => $ch_today_remaining,
+        'today_pct'       => $ch_today_pct,
+    ];
+}
 
 // 获取最近日志
 $stmt = $tap_pdo->prepare("SELECT * FROM tap_logs ORDER BY created_at DESC LIMIT 20");
@@ -82,12 +126,12 @@ function showLoginPage() {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NewAPI-TAP 登录</title>
+    <title><?= htmlspecialchars($GLOBALS['site_name']) ?> - 登录</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body class="login-body">
     <div class="login-box">
-        <h1>NewAPI-TAP</h1>
+        <h1><?= htmlspecialchars($GLOBALS['site_name']) ?></h1>
         <?php if (isset($_POST['key']) && $_POST['key'] !== $GLOBALS['access_key']): ?>
             <div class="error">密钥错误，请重试</div>
         <?php endif; ?>
@@ -106,7 +150,7 @@ function showLoginPage() {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NewAPI-TAP - 免费额度水龙头控制</title>
+    <title><?= htmlspecialchars($site_name) ?> - 免费额度水龙头控制</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -115,10 +159,12 @@ function showLoginPage() {
         <div class="header">
             <div class="header-row">
                 <div>
-                    <h1>NewAPI-TAP</h1>
+                    <h1><?= htmlspecialchars($site_name) ?></h1>
                     <div class="subtitle">免费额度水龙头控制系统</div>
                 </div>
+                <?php if (!empty($api_site_url)): ?>
                 <a href="<?= htmlspecialchars($api_site_url) ?>" class="btn-back" target="_blank">返回API站</a>
+                <?php endif; ?>
             </div>
         </div>
 
@@ -132,7 +178,7 @@ function showLoginPage() {
             <span class="dot"></span>页面每 30 秒自动刷新 &nbsp;|&nbsp; 上次检查: <?= htmlspecialchars($last_check) ?>
         </div>
 
-        <!-- Monthly Stats -->
+        <!-- Monthly Stats (Overall) -->
         <div class="cards">
             <div class="card">
                 <div class="label">月度总额度</div>
@@ -195,31 +241,58 @@ function showLoginPage() {
             </div>
         </div>
 
-        <!-- Channel Status -->
+        <!-- Channel Status with per-channel quota -->
         <div class="section">
             <h2>渠道状态</h2>
-            <div style="overflow-x: auto;">
-                <table class="channel-table">
-                    <thead>
-                        <tr>
-                            <th>渠道编号</th>
-                            <th>模型名称</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach ($tap_channels as $ch): 
-                            $stmt = $newapi_pdo->prepare("SELECT models FROM channels WHERE id = ?");
-                            $stmt->execute([$ch['channel_id']]);
-                            $models = $stmt->fetchColumn() ?: '未知';
-                        ?>
-                        <tr>
-                            <td>#<?= $ch['channel_id'] ?></td>
-                            <td><code class="code-blue"><?= htmlspecialchars($models) ?></code></td>
-                        </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
+            <?php foreach ($channel_stats as $cs): ?>
+            <div class="channel-card">
+                <div class="channel-card-header">
+                    <span class="channel-id">#<?= $cs['channel_id'] ?></span>
+                    <span class="channel-models"><code class="code-blue"><?= htmlspecialchars($cs['models']) ?></code></span>
+                </div>
+                <?php if ($cs['monthly_tokens'] > 0): ?>
+                <div class="channel-card-stats">
+                    <div class="channel-stat">
+                        <span class="channel-stat-label">月度额度</span>
+                        <span class="channel-stat-value"><?= formatTokens($cs['monthly_tokens']) ?></span>
+                    </div>
+                    <div class="channel-stat">
+                        <span class="channel-stat-label">本月已用</span>
+                        <span class="channel-stat-value warning"><?= formatTokens($cs['month_used']) ?></span>
+                    </div>
+                    <div class="channel-stat">
+                        <span class="channel-stat-label">今日额度</span>
+                        <span class="channel-stat-value info"><?= formatTokens($cs['today_allowance']) ?></span>
+                    </div>
+                    <div class="channel-stat">
+                        <span class="channel-stat-label">今日已用</span>
+                        <span class="channel-stat-value <?= $cs['today_pct'] >= 100 ? 'danger' : 'success' ?>"><?= formatTokens($cs['today_used']) ?></span>
+                    </div>
+                </div>
+                <div class="progress-wrap">
+                    <div class="progress-bar">
+                        <div class="progress-fill <?= $cs['month_pct'] > 80 ? 'red' : ($cs['month_pct'] > 50 ? 'yellow' : 'green') ?>" style="width: <?= $cs['month_pct'] ?>%"></div>
+                    </div>
+                    <div class="progress-text">
+                        <span>月度已用 <?= $cs['month_pct'] ?>%</span>
+                        <span>剩余 <?= formatTokens($cs['remaining']) ?></span>
+                    </div>
+                </div>
+                <?php else: ?>
+                <div class="channel-card-stats">
+                    <div class="channel-stat">
+                        <span class="channel-stat-label">本月已用</span>
+                        <span class="channel-stat-value warning"><?= formatTokens($cs['month_used']) ?></span>
+                    </div>
+                    <div class="channel-stat">
+                        <span class="channel-stat-label">今日已用</span>
+                        <span class="channel-stat-value info"><?= formatTokens($cs['today_used']) ?></span>
+                    </div>
+                </div>
+                <div class="channel-no-quota">使用总额度均分</div>
+                <?php endif; ?>
             </div>
+            <?php endforeach; ?>
         </div>
 
         <!-- Logs -->
@@ -242,12 +315,11 @@ function showLoginPage() {
 
         <!-- Footer -->
         <div class="footer">
-            NewAPI-TAP v1.0 · 检查间隔 <?= $check_interval ?>秒 · <?= date('Y-m-d H:i:s') ?>
+            <?= htmlspecialchars($site_name) ?> v1.0 · 检查间隔 <?= $check_interval ?>秒 · <?= date('Y-m-d H:i:s') ?>
         </div>
     </div>
 
     <script>
-        // 自动刷新
         setTimeout(function() { location.reload(); }, 30000);
     </script>
 </body>

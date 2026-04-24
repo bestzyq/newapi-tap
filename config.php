@@ -3,66 +3,94 @@
  * NewAPI-TAP 配置文件
  * 
  * 水龙头控制系统：每月免费提供一定量 token，每日平均分配，超量关水龙头
+ * 
+ * 配置从 .env 文件读取，请复制 .env.example 为 .env 并填写实际值
  */
 
-// ============ 数据库配置 ============
-// newapi 数据库（查询 logs 表统计用量，读写 channels/abilities 表控制水龙头）
-$newapi_db_host = 'localhost';
-$newapi_db_user = 'newapi';
-$newapi_db_pass = 'newapi';
-$newapi_db_name = 'newapi';
+// ============ 加载 .env 文件 ============
+$env_file = __DIR__ . '/.env';
+if (!file_exists($env_file)) {
+    die('错误：未找到 .env 文件，请复制 .env.example 为 .env 并填写配置');
+}
 
-// newapi-tap 自身数据库（读写，存储状态和日志）
-$tap_db_host = 'localhost';
-$tap_db_user = 'newapi_tap';
-$tap_db_pass = 'newapi_tap';
-$tap_db_name = 'newapi_tap';
+$env_lines = file($env_file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+foreach ($env_lines as $line) {
+    $line = trim($line);
+    if ($line === '' || str_starts_with($line, '#')) {
+        continue;
+    }
+    if (strpos($line, '=') === false) {
+        continue;
+    }
+    list($key, $value) = explode('=', $line, 2);
+    $key = trim($key);
+    $value = trim($value);
+    putenv("$key=$value");
+    $_ENV[$key] = $value;
+}
+
+// ============ 辅助函数：读取环境变量 ============
+function env(string $key, string $default = ''): string {
+    $val = getenv($key);
+    return $val !== false ? $val : $default;
+}
+
+function envInt(string $key, int $default = 0): int {
+    $val = getenv($key);
+    return $val !== false ? (int)$val : $default;
+}
+
+// ============ 数据库配置 ============
+$newapi_db_host = env('NEWAPI_DB_HOST', 'localhost');
+$newapi_db_user = env('NEWAPI_DB_USER', 'newapi');
+$newapi_db_pass = env('NEWAPI_DB_PASS', 'newapi');
+$newapi_db_name = env('NEWAPI_DB_NAME', 'newapi');
+
+$tap_db_host = env('TAP_DB_HOST', 'localhost');
+$tap_db_user = env('TAP_DB_USER', 'newapi_tap');
+$tap_db_pass = env('TAP_DB_PASS', 'newapi_tap');
+$tap_db_name = env('TAP_DB_NAME', 'newapi_tap');
+
+// ============ 站点配置 ============
+$site_name = env('SITE_NAME', 'NewAPI-TAP');
+$api_site_url = env('API_SITE_URL', '');
 
 // ============ 每月免费额度配置 ============
-// 单位：token
-$monthly_tokens = 100000000; // 1亿 token
+$monthly_tokens = envInt('MONTHLY_TOKENS', 100000000);
 
 // ============ 水龙头渠道配置 ============
-// 支持多渠道配置，方便扩展
-// open_groups: 水龙头开启时的分组（包含免费组）
-// closed_groups: 水龙头关闭时的分组（不含免费组）
-// abilities 参数（enabled/priority/weight/tag）自动从 channels 表读取，无需配置
-$tap_channels = [
-    [
-        'channel_id'    => 35,
-        'open_groups'   => 'default,vip,svip,free',
-        'closed_groups' => 'default,vip,svip',
-        'name'          => '免费渠道 #35',
-    ],
-    // 如需更多渠道，按以下格式添加：
-    // [
-    //     'channel_id'    => 36,
-    //     'open_groups'   => 'default,vip,free',
-    //     'closed_groups' => 'default,vip',
-    //     'name'          => '免费渠道 #36',
-    // ],
-];
+// 格式：渠道ID:月度额度:开启分组:关闭分组
+// 月度额度为 0 表示使用总额度均分
+$tap_channels_raw = env('TAP_CHANNELS', '');
+$tap_channels = [];
+if ($tap_channels_raw !== '') {
+    foreach (explode(';', $tap_channels_raw) as $ch_str) {
+        $parts = explode(':', $ch_str, 4);
+        if (count($parts) >= 4) {
+            $tap_channels[] = [
+                'channel_id'    => (int)$parts[0],
+                'monthly_tokens' => (int)$parts[1],
+                'open_groups'   => $parts[2],
+                'closed_groups' => $parts[3],
+            ];
+        }
+    }
+}
 
 // ============ 时间配置 ============
-$check_interval = 300; // 检查间隔（秒），5分钟
+$check_interval = envInt('CHECK_INTERVAL', 300);
 date_default_timezone_set('Asia/Shanghai');
 
 // ============ 日志保留天数 ============
-$log_retention_days = 90;
+$log_retention_days = envInt('LOG_RETENTION_DAYS', 90);
 
-// ============ API 站点地址 ============
-// 用于"返回API站"按钮的链接地址
-$api_site_url = 'https://your-api-site.com';
-
-// ============ 访问密钥（可选，为空则不验证） ============
-// 建议设置一个密钥以防止未授权访问仪表盘
-$access_key = '';  // 例如：'my-secret-key-123'
+// ============ 访问密钥 ============
+$access_key = env('ACCESS_KEY', '');
 
 // ============ 以下为内部函数，一般无需修改 ============
 
 /**
  * 获取 newapi 数据库连接
- * 用于查询 logs、channels、abilities 表
  */
 function getNewapiDB() {
     global $newapi_db_host, $newapi_db_user, $newapi_db_pass, $newapi_db_name;
@@ -83,8 +111,6 @@ function getNewapiDB() {
 
 /**
  * 获取 tap 数据库连接（读写）
- * 用于读写 tap_state 和 tap_logs 表
- * 以及写 newapi 的 channels 表（开关水龙头）
  */
 function getTapDB() {
     global $tap_db_host, $tap_db_user, $tap_db_pass, $tap_db_name;

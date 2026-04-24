@@ -85,10 +85,30 @@ function showLoginPage() {
     <title>NewAPI-TAP 登录</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f172a; color: #e2e8f0; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
-        .login-box { background: #1e293b; padding: 2rem; border-radius: 12px; width: 360px; box-shadow: 0 4px 24px rgba(0,0,0,0.3); }
+        :root {
+            --login-bg: #f8fafc;
+            --login-text: #1e293b;
+            --login-box-bg: #ffffff;
+            --login-box-shadow: rgba(0,0,0,0.1);
+            --login-input-bg: #f1f5f9;
+            --login-input-border: #e2e8f0;
+            --login-input-text: #1e293b;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --login-bg: #0f172a;
+                --login-text: #e2e8f0;
+                --login-box-bg: #1e293b;
+                --login-box-shadow: rgba(0,0,0,0.3);
+                --login-input-bg: #0f172a;
+                --login-input-border: #334155;
+                --login-input-text: #e2e8f0;
+            }
+        }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--login-bg); color: var(--login-text); display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+        .login-box { background: var(--login-box-bg); padding: 2rem; border-radius: 12px; width: 360px; box-shadow: 0 4px 24px var(--login-box-shadow); }
         .login-box h1 { text-align: center; margin-bottom: 1.5rem; font-size: 1.5rem; }
-        .login-box input { width: 100%; padding: 0.75rem 1rem; border: 1px solid #334155; border-radius: 8px; background: #0f172a; color: #e2e8f0; font-size: 1rem; margin-bottom: 1rem; }
+        .login-box input { width: 100%; padding: 0.75rem 1rem; border: 1px solid var(--login-input-border); border-radius: 8px; background: var(--login-input-bg); color: var(--login-input-text); font-size: 1rem; margin-bottom: 1rem; }
         .login-box button { width: 100%; padding: 0.75rem; border: none; border-radius: 8px; background: #3b82f6; color: #fff; font-size: 1rem; cursor: pointer; font-weight: 600; }
         .login-box button:hover { background: #2563eb; }
         .error { color: #ef4444; text-align: center; margin-bottom: 1rem; font-size: 0.875rem; }
@@ -118,10 +138,120 @@ function showLoginPage() {
     <title>NewAPI-TAP - 免费额度水龙头控制</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        /* ===== Light theme (default) ===== */
+        :root {
+            --bg-body: #f8fafc;
+            --bg-card: #ffffff;
+            --border-card: #e2e8f0;
+            --shadow-card-hover: 0 4px 20px rgba(0,0,0,0.08);
+            --text-primary: #1e293b;
+            --text-secondary: #64748b;
+            --text-tertiary: #94a3b8;
+            --text-label: #64748b;
+
+            --banner-open-bg: linear-gradient(135deg, #ecfdf5, #d1fae5);
+            --banner-open-border: #10b981;
+            --banner-open-color: #065f46;
+            --banner-closed-bg: linear-gradient(135deg, #fef2f2, #fee2e2);
+            --banner-closed-border: #ef4444;
+            --banner-closed-color: #991b1b;
+
+            --progress-bg: #e2e8f0;
+            --section-heading-border: #e2e8f0;
+
+            --log-border: #f1f5f9;
+            --log-time-color: #94a3b8;
+            --log-msg-color: #334155;
+
+            --badge-tap-open-bg: #d1fae5; --badge-tap-open-color: #065f46;
+            --badge-tap-close-bg: #fee2e2; --badge-tap-close-color: #991b1b;
+            --badge-install-bg: #dbeafe; --badge-install-color: #1e40af;
+            --badge-month-reset-bg: #ede9fe; --badge-month-reset-color: #5b21b6;
+
+            --chart-value-color: #64748b;
+            --chart-label-color: #94a3b8;
+
+            --table-header-color: #64748b;
+            --table-header-border: #e2e8f0;
+            --table-row-border: #f1f5f9;
+            --code-green: #059669;
+            --code-red: #dc2626;
+            --code-blue: #2563eb;
+
+            --footer-color: #94a3b8;
+            --footer-border: #e2e8f0;
+
+            --scrollbar-track: #f1f5f9;
+            --scrollbar-thumb: #cbd5e1;
+            --scrollbar-thumb-hover: #94a3b8;
+
+            --refresh-dot: #3b82f6;
+            --refresh-text: #94a3b8;
+
+            --no-logs-color: #94a3b8;
+        }
+
+        /* ===== Dark theme ===== */
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg-body: #0f172a;
+                --bg-card: #1e293b;
+                --border-card: #334155;
+                --shadow-card-hover: 0 4px 20px rgba(0,0,0,0.3);
+                --text-primary: #e2e8f0;
+                --text-secondary: #94a3b8;
+                --text-tertiary: #64748b;
+                --text-label: #94a3b8;
+
+                --banner-open-bg: linear-gradient(135deg, #065f46, #047857);
+                --banner-open-border: #10b981;
+                --banner-open-color: #6ee7b7;
+                --banner-closed-bg: linear-gradient(135deg, #7f1d1d, #991b1b);
+                --banner-closed-border: #ef4444;
+                --banner-closed-color: #fca5a5;
+
+                --progress-bg: #334155;
+                --section-heading-border: #334155;
+
+                --log-border: #1e293b;
+                --log-time-color: #64748b;
+                --log-msg-color: #cbd5e1;
+
+                --badge-tap-open-bg: #065f46; --badge-tap-open-color: #6ee7b7;
+                --badge-tap-close-bg: #7f1d1d; --badge-tap-close-color: #fca5a5;
+                --badge-install-bg: #1e3a5f; --badge-install-color: #7dd3fc;
+                --badge-month-reset-bg: #4a1d7a; --badge-month-reset-color: #c4b5fd;
+
+                --chart-value-color: #94a3b8;
+                --chart-label-color: #64748b;
+
+                --table-header-color: #94a3b8;
+                --table-header-border: #334155;
+                --table-row-border: #1e293b;
+                --code-green: #6ee7b7;
+                --code-red: #fca5a5;
+                --code-blue: #93c5fd;
+
+                --footer-color: #475569;
+                --footer-border: #1e293b;
+
+                --scrollbar-track: #0f172a;
+                --scrollbar-thumb: #334155;
+                --scrollbar-thumb-hover: #475569;
+
+                --refresh-dot: #3b82f6;
+                --refresh-text: #475569;
+
+                --no-logs-color: #64748b;
+            }
+        }
+
+        /* ===== Base ===== */
         body { 
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif; 
-            background: #0f172a; 
-            color: #e2e8f0; 
+            background: var(--bg-body); 
+            color: var(--text-primary); 
             min-height: 100vh;
             line-height: 1.6;
         }
@@ -130,7 +260,7 @@ function showLoginPage() {
         /* Header */
         .header { text-align: center; margin-bottom: 2.5rem; }
         .header h1 { font-size: 2rem; font-weight: 700; margin-bottom: 0.5rem; }
-        .header .subtitle { color: #94a3b8; font-size: 0.95rem; }
+        .header .subtitle { color: var(--text-secondary); font-size: 0.95rem; }
 
         /* Tap Status Banner */
         .tap-banner {
@@ -143,49 +273,55 @@ function showLoginPage() {
             transition: all 0.3s;
         }
         .tap-banner.open {
-            background: linear-gradient(135deg, #065f46, #047857);
-            border: 1px solid #10b981;
-            color: #6ee7b7;
+            background: var(--banner-open-bg);
+            border: 1px solid var(--banner-open-border);
+            color: var(--banner-open-color);
         }
         .tap-banner.closed {
-            background: linear-gradient(135deg, #7f1d1d, #991b1b);
-            border: 1px solid #ef4444;
-            color: #fca5a5;
+            background: var(--banner-closed-bg);
+            border: 1px solid var(--banner-closed-border);
+            color: var(--banner-closed-color);
         }
 
         /* Cards Grid */
         .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1.25rem; margin-bottom: 2rem; }
         .card {
-            background: #1e293b;
-            border: 1px solid #334155;
+            background: var(--bg-card);
+            border: 1px solid var(--border-card);
             border-radius: 12px;
             padding: 1.5rem;
             transition: transform 0.2s, box-shadow 0.2s;
         }
-        .card:hover { transform: translateY(-2px); box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
-        .card .label { color: #94a3b8; font-size: 0.85rem; margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 0.05em; }
+        .card:hover { transform: translateY(-2px); box-shadow: var(--shadow-card-hover); }
+        .card .label { color: var(--text-label); font-size: 0.85rem; margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 0.05em; }
         .card .value { font-size: 1.75rem; font-weight: 700; }
-        .card .unit { font-size: 0.85rem; font-weight: 400; color: #94a3b8; margin-left: 0.25rem; }
-        .card .sub { color: #64748b; font-size: 0.8rem; margin-top: 0.25rem; }
+        .card .unit { font-size: 0.85rem; font-weight: 400; color: var(--text-secondary); margin-left: 0.25rem; }
+        .card .sub { color: var(--text-tertiary); font-size: 0.8rem; margin-top: 0.25rem; }
+
+        /* Card accent colors */
+        .card .value.warning { color: #f59e0b; }
+        .card .value.info { color: #3b82f6; }
+        .card .value.danger { color: #ef4444; }
+        .card .value.success { color: #10b981; }
 
         /* Progress Bar */
         .progress-wrap { margin-top: 0.75rem; }
-        .progress-bar { height: 8px; background: #334155; border-radius: 4px; overflow: hidden; }
+        .progress-bar { height: 8px; background: var(--progress-bg); border-radius: 4px; overflow: hidden; }
         .progress-fill { height: 100%; border-radius: 4px; transition: width 0.5s ease; }
         .progress-fill.green { background: linear-gradient(90deg, #10b981, #34d399); }
         .progress-fill.yellow { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
         .progress-fill.red { background: linear-gradient(90deg, #ef4444, #f87171); }
-        .progress-text { display: flex; justify-content: space-between; font-size: 0.75rem; color: #64748b; margin-top: 0.35rem; }
+        .progress-text { display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--text-tertiary); margin-top: 0.35rem; }
 
         /* Sections */
         .section { 
-            background: #1e293b; 
-            border: 1px solid #334155; 
+            background: var(--bg-card); 
+            border: 1px solid var(--border-card); 
             border-radius: 12px; 
             padding: 1.5rem; 
             margin-bottom: 1.5rem; 
         }
-        .section h2 { font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem; padding-bottom: 0.75rem; border-bottom: 1px solid #334155; }
+        .section h2 { font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem; padding-bottom: 0.75rem; border-bottom: 1px solid var(--section-heading-border); }
 
         /* Chart */
         .chart-container { display: flex; align-items: flex-end; gap: 0.5rem; height: 180px; padding-top: 1rem; }
@@ -200,21 +336,21 @@ function showLoginPage() {
             position: relative;
         }
         .chart-bar.today { background: linear-gradient(180deg, #10b981, #059669); }
-        .chart-bar-value { font-size: 0.65rem; color: #94a3b8; margin-bottom: 4px; text-align: center; }
-        .chart-bar-label { font-size: 0.7rem; color: #64748b; margin-top: 6px; }
+        .chart-bar-value { font-size: 0.65rem; color: var(--chart-value-color); margin-bottom: 4px; text-align: center; }
+        .chart-bar-label { font-size: 0.7rem; color: var(--chart-label-color); margin-top: 6px; }
 
         /* Logs */
         .log-list { max-height: 400px; overflow-y: auto; }
         .log-item { 
             padding: 0.6rem 0; 
-            border-bottom: 1px solid #1e293b; 
+            border-bottom: 1px solid var(--log-border); 
             display: flex; 
             gap: 0.75rem; 
             align-items: flex-start;
             font-size: 0.85rem;
         }
         .log-item:last-child { border-bottom: none; }
-        .log-time { color: #64748b; white-space: nowrap; min-width: 140px; }
+        .log-time { color: var(--log-time-color); white-space: nowrap; min-width: 140px; }
         .log-action { 
             padding: 0.15rem 0.5rem; 
             border-radius: 4px; 
@@ -222,14 +358,25 @@ function showLoginPage() {
             font-weight: 600;
             white-space: nowrap;
         }
-        .log-action.tap_open { background: #065f46; color: #6ee7b7; }
-        .log-action.tap_close { background: #7f1d1d; color: #fca5a5; }
-        .log-action.install { background: #1e3a5f; color: #7dd3fc; }
-        .log-action.month_reset { background: #4a1d7a; color: #c4b5fd; }
-        .log-msg { color: #cbd5e1; flex: 1; }
+        .log-action.tap_open { background: var(--badge-tap-open-bg); color: var(--badge-tap-open-color); }
+        .log-action.tap_close { background: var(--badge-tap-close-bg); color: var(--badge-tap-close-color); }
+        .log-action.install { background: var(--badge-install-bg); color: var(--badge-install-color); }
+        .log-action.month_reset { background: var(--badge-month-reset-bg); color: var(--badge-month-reset-color); }
+        .log-msg { color: var(--log-msg-color); flex: 1; }
+
+        /* Channel Table */
+        .channel-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+        .channel-table thead tr { border-bottom: 1px solid var(--table-header-border); }
+        .channel-table th { padding: 0.5rem; text-align: left; color: var(--table-header-color); }
+        .channel-table td { padding: 0.5rem; }
+        .channel-table tbody tr { border-bottom: 1px solid var(--table-row-border); }
+        .channel-table tbody tr:last-child { border-bottom: none; }
+        .code-green { color: var(--code-green); font-size: 0.8rem; }
+        .code-red { color: var(--code-red); font-size: 0.8rem; }
+        .code-blue { color: var(--code-blue); font-size: 0.8rem; }
 
         /* Footer */
-        .footer { text-align: center; color: #475569; font-size: 0.8rem; margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #1e293b; }
+        .footer { text-align: center; color: var(--footer-color); font-size: 0.8rem; margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--footer-border); }
 
         /* Responsive */
         @media (max-width: 640px) {
@@ -243,14 +390,14 @@ function showLoginPage() {
         /* Auto refresh indicator */
         .refresh-bar {
             text-align: center;
-            color: #475569;
+            color: var(--refresh-text);
             font-size: 0.75rem;
             margin-bottom: 1.5rem;
         }
         .refresh-bar .dot {
             display: inline-block;
             width: 6px; height: 6px;
-            background: #3b82f6;
+            background: var(--refresh-dot);
             border-radius: 50%;
             margin-right: 4px;
             animation: pulse 2s infinite;
@@ -262,9 +409,12 @@ function showLoginPage() {
 
         /* Scrollbar */
         ::-webkit-scrollbar { width: 6px; }
-        ::-webkit-scrollbar-track { background: #0f172a; }
-        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
-        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+        ::-webkit-scrollbar-track { background: var(--scrollbar-track); }
+        ::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
+
+        /* No logs placeholder */
+        .no-logs { color: var(--no-logs-color); text-align: center; padding: 2rem; }
     </style>
 </head>
 <body>
@@ -294,7 +444,7 @@ function showLoginPage() {
             </div>
             <div class="card">
                 <div class="label">本月已消耗</div>
-                <div class="value" style="color: #f59e0b;"><?= formatTokens($month_used) ?><span class="unit">tokens</span></div>
+                <div class="value warning"><?= formatTokens($month_used) ?><span class="unit">tokens</span></div>
                 <div class="sub">已过 <?= $day_of_month ?> 天 · 日均 <?= formatTokens($day_of_month > 0 ? intdiv($month_used, $day_of_month) : 0) ?></div>
                 <div class="progress-wrap">
                     <div class="progress-bar">
@@ -308,12 +458,12 @@ function showLoginPage() {
             </div>
             <div class="card">
                 <div class="label">今日额度</div>
-                <div class="value" style="color: #3b82f6;"><?= formatTokens($today_allowance) ?><span class="unit">tokens</span></div>
+                <div class="value info"><?= formatTokens($today_allowance) ?><span class="unit">tokens</span></div>
                 <div class="sub">剩余 <?= $days_remaining ?> 天均分</div>
             </div>
             <div class="card">
                 <div class="label">今日已用</div>
-                <div class="value" style="color: <?= $today_usage_pct >= 100 ? '#ef4444' : '#10b981' ?>;">
+                <div class="value <?= $today_usage_pct >= 100 ? 'danger' : 'success' ?>">
                     <?= formatTokens($today_used) ?><span class="unit">tokens</span>
                 </div>
                 <div class="sub">剩余 <?= formatTokens($today_remaining) ?></div>
@@ -352,13 +502,13 @@ function showLoginPage() {
         <div class="section">
             <h2>渠道状态</h2>
             <div style="overflow-x: auto;">
-                <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+                <table class="channel-table">
                     <thead>
-                        <tr style="border-bottom: 1px solid #334155;">
-                            <th style="padding: 0.5rem; text-align: left; color: #94a3b8;">渠道</th>
-                            <th style="padding: 0.5rem; text-align: left; color: #94a3b8;">开启分组</th>
-                            <th style="padding: 0.5rem; text-align: left; color: #94a3b8;">关闭分组</th>
-                            <th style="padding: 0.5rem; text-align: left; color: #94a3b8;">当前分组</th>
+                        <tr>
+                            <th>渠道</th>
+                            <th>开启分组</th>
+                            <th>关闭分组</th>
+                            <th>当前分组</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -367,11 +517,11 @@ function showLoginPage() {
                             $stmt->execute([$ch['channel_id']]);
                             $current_group = $stmt->fetchColumn() ?: '未知';
                         ?>
-                        <tr style="border-bottom: 1px solid #1e293b;">
-                            <td style="padding: 0.5rem;"><?= htmlspecialchars($ch['name']) ?> (#<?= $ch['channel_id'] ?>)</td>
-                            <td style="padding: 0.5rem;"><code style="color: #6ee7b7; font-size: 0.8rem;"><?= htmlspecialchars($ch['open_groups']) ?></code></td>
-                            <td style="padding: 0.5rem;"><code style="color: #fca5a5; font-size: 0.8rem;"><?= htmlspecialchars($ch['closed_groups']) ?></code></td>
-                            <td style="padding: 0.5rem;"><code style="color: #93c5fd; font-size: 0.8rem;"><?= htmlspecialchars($current_group) ?></code></td>
+                        <tr>
+                            <td><?= htmlspecialchars($ch['name']) ?> (#<?= $ch['channel_id'] ?>)</td>
+                            <td><code class="code-green"><?= htmlspecialchars($ch['open_groups']) ?></code></td>
+                            <td><code class="code-red"><?= htmlspecialchars($ch['closed_groups']) ?></code></td>
+                            <td><code class="code-blue"><?= htmlspecialchars($current_group) ?></code></td>
                         </tr>
                         <?php endforeach; ?>
                     </tbody>
@@ -384,7 +534,7 @@ function showLoginPage() {
             <h2>操作日志</h2>
             <div class="log-list">
                 <?php if (empty($recent_logs)): ?>
-                <div style="color: #64748b; text-align: center; padding: 2rem;">暂无日志</div>
+                <div class="no-logs">暂无日志</div>
                 <?php else: ?>
                 <?php foreach ($recent_logs as $log): ?>
                 <div class="log-item">

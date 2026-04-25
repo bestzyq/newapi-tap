@@ -34,8 +34,13 @@ function writeLog($tap_pdo, $action, $message, $detail = null) {
 
 // ============ 清理旧日志 ============
 
-$stmt = $tap_pdo->prepare("DELETE FROM tap_logs WHERE created_at < DATE_SUB(NOW(), INTERVAL ? DAY)");
-$stmt->execute([$log_retention_days]);
+// 分批删除旧日志，避免锁表
+$batch_size = 1000;
+do {
+    $stmt = $tap_pdo->prepare("DELETE FROM tap_logs WHERE created_at < DATE_SUB(NOW(), INTERVAL ? DAY) LIMIT $batch_size");
+    $stmt->execute([$log_retention_days]);
+    $deleted = $stmt->rowCount();
+} while ($deleted >= $batch_size);
 
 // ============ 检查月份切换 ============
 
@@ -87,6 +92,25 @@ if ($shared_id_list !== '') {
     $global_today_remaining = 0;
 }
 
+// ============ 批量查询渠道用量 ============
+
+$all_id_list = implode(',', array_map('intval', $all_channel_ids));
+$today_usage_map = [];
+$month_usage_map = [];
+if ($all_id_list !== '') {
+    $stmt = $newapi_pdo->prepare("SELECT channel_id, COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS total FROM logs WHERE channel_id IN ($all_id_list) AND created_at >= ? GROUP BY channel_id");
+    $stmt->execute([$today_start_ts]);
+    while ($row = $stmt->fetch()) {
+        $today_usage_map[(int)$row['channel_id']] = (int)$row['total'];
+    }
+
+    $stmt = $newapi_pdo->prepare("SELECT channel_id, COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS total FROM logs WHERE channel_id IN ($all_id_list) AND created_at >= ? GROUP BY channel_id");
+    $stmt->execute([$month_start_ts]);
+    while ($row = $stmt->fetch()) {
+        $month_usage_map[(int)$row['channel_id']] = (int)$row['total'];
+    }
+}
+
 // ============ 逐渠道检查与控制 ============
 
 $any_open = false;
@@ -98,15 +122,9 @@ foreach ($tap_channels as $channel) {
     $ch_quota = $channel['quota'];
     $state_key = "tap_open_{$ch_id}";
 
-    // 计算该渠道的今日用量
-    $stmt = $newapi_pdo->prepare("SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) as total FROM logs WHERE channel_id = ? AND created_at >= ?");
-    $stmt->execute([$ch_id, $today_start_ts]);
-    $ch_today_used = (int)$stmt->fetch()['total'];
-
-    // 计算该渠道的月度用量
-    $stmt = $newapi_pdo->prepare("SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) as total FROM logs WHERE channel_id = ? AND created_at >= ?");
-    $stmt->execute([$ch_id, $month_start_ts]);
-    $ch_month_used = (int)$stmt->fetch()['total'];
+    // 从批量查询结果中获取用量
+    $ch_today_used = $today_usage_map[$ch_id] ?? 0;
+    $ch_month_used = $month_usage_map[$ch_id] ?? 0;
 
     // 根据模式确定今日额度
     switch ($ch_mode) {

@@ -112,6 +112,17 @@ try {
         $missing = array_diff($required, $fields);
         if (empty($missing)) {
             echo "    [✓] 必要字段齐全 (channel_id, prompt_tokens, completion_tokens, created_at)\n";
+            // 创建复合索引以优化查询性能
+            try {
+                $newapi_pdo->exec("CREATE INDEX idx_channel_created ON logs (channel_id, created_at)");
+                echo "    [✓] 复合索引 idx_channel_created 已创建\n";
+            } catch (PDOException $e) {
+                if (strpos($e->getMessage(), 'Duplicate key name') !== false) {
+                    echo "    [i] 复合索引 idx_channel_created 已存在，跳过\n";
+                } else {
+                    echo "    [!] 创建复合索引失败: " . $e->getMessage() . " (可手动执行: CREATE INDEX idx_channel_created ON logs (channel_id, created_at))\n";
+                }
+            }
         } else {
             echo "    [✗] 缺少字段: " . implode(', ', $missing) . "\n";
         }

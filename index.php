@@ -31,7 +31,7 @@ function getState($tap_pdo, $key, $default = '') {
     return $result ? $result['config_value'] : $default;
 }
 
-// ============ 总体统计（仅 shared 渠道参与月度总额） ============
+// ============ 总体统计（从 cron 缓存读取，避免查询 logs 大表） ============
 $shared_channel_ids = [];
 $all_channel_ids = [];
 foreach ($tap_channels as $ch) {
@@ -49,63 +49,67 @@ $days_in_month = (int)date('t');
 $day_of_month = (int)date('j');
 $days_remaining = $days_in_month - $day_of_month + 1;
 
-// 全局月度统计（仅 shared 渠道）
-if ($shared_id_list !== '') {
-    $stmt = $newapi_pdo->prepare("SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) as total FROM logs WHERE channel_id IN ($shared_id_list) AND created_at >= ?");
-    $stmt->execute([$month_start_ts]);
-    $month_used = (int)$stmt->fetch()['total'];
-
-    $stmt = $newapi_pdo->prepare("SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) as total FROM logs WHERE channel_id IN ($shared_id_list) AND created_at >= ?");
-    $stmt->execute([$today_start_ts]);
-    $today_used = (int)$stmt->fetch()['total'];
-} else {
-    $month_used = 0;
-    $today_used = 0;
+// 批量读取 tap_state 缓存（由 cron.php 定期更新）
+$state_keys = ['tap_open', 'last_check', 'month_used', 'today_used', 'today_allowance', 'today_remaining', 'remaining'];
+foreach ($tap_channels as $ch) {
+    $ch_id = $ch['channel_id'];
+    $state_keys[] = "month_used_{$ch_id}";
+    $state_keys[] = "today_used_{$ch_id}";
+    $state_keys[] = "today_allowance_{$ch_id}";
+    $state_keys[] = "today_remaining_{$ch_id}";
+    $state_keys[] = "remaining_{$ch_id}";
+}
+$state_ph = implode(',', array_fill(0, count($state_keys), '?'));
+$stmt = $tap_pdo->prepare("SELECT config_key, config_value FROM tap_state WHERE config_key IN ($state_ph)");
+$stmt->execute($state_keys);
+$state_cache = [];
+while ($row = $stmt->fetch()) {
+    $state_cache[$row['config_key']] = $row['config_value'];
 }
 
-$remaining = max(0, $monthly_tokens - $month_used);
-$today_allowance = $days_remaining > 0 ? intdiv($remaining, $days_remaining) : 0;
-$today_remaining = max(0, $today_allowance - $today_used);
-$tap_open = getState($tap_pdo, 'tap_open', '1') === '1';
-$last_check = getState($tap_pdo, 'last_check', '从未');
+// 全局月度统计（从缓存读取）
+$month_used = (int)($state_cache['month_used'] ?? 0);
+$today_used = (int)($state_cache['today_used'] ?? 0);
+$today_allowance = (int)($state_cache['today_allowance'] ?? 0);
+$today_remaining = (int)($state_cache['today_remaining'] ?? 0);
+$remaining = (int)($state_cache['remaining'] ?? 0);
+$tap_open = ($state_cache['tap_open'] ?? '1') === '1';
+$last_check = $state_cache['last_check'] ?? '从未';
 
 $month_usage_pct = $monthly_tokens > 0 ? min(100, round($month_used / $monthly_tokens * 100, 1)) : 0;
 $today_usage_pct = $today_allowance > 0 ? min(100, round($today_used / $today_allowance * 100, 1)) : 0;
 
-// ============ 分渠道统计 ============
+// ============ 分渠道统计（从缓存读取） ============
+// 批量获取渠道模型
+$stmt = $newapi_pdo->prepare("SELECT id, models FROM channels WHERE id IN ($all_id_list)");
+$stmt->execute();
+$channel_models = [];
+while ($row = $stmt->fetch()) {
+    $channel_models[(int)$row['id']] = $row['models'] ?: '未知';
+}
+
 $channel_stats = [];
 foreach ($tap_channels as $ch) {
     $ch_id = $ch['channel_id'];
     $ch_mode = $ch['mode'];
     $ch_quota = $ch['quota'];
+    $models = $channel_models[$ch_id] ?? '未知';
 
-    $stmt = $newapi_pdo->prepare("SELECT models FROM channels WHERE id = ?");
-    $stmt->execute([$ch_id]);
-    $models = $stmt->fetchColumn() ?: '未知';
-
-    $stmt = $newapi_pdo->prepare("SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) as total FROM logs WHERE channel_id = ? AND created_at >= ?");
-    $stmt->execute([$ch_id, $month_start_ts]);
-    $ch_month_used = (int)$stmt->fetch()['total'];
-
-    $stmt = $newapi_pdo->prepare("SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) as total FROM logs WHERE channel_id = ? AND created_at >= ?");
-    $stmt->execute([$ch_id, $today_start_ts]);
-    $ch_today_used = (int)$stmt->fetch()['total'];
+    $ch_month_used = (int)($state_cache["month_used_{$ch_id}"] ?? 0);
+    $ch_today_used = (int)($state_cache["today_used_{$ch_id}"] ?? 0);
+    $ch_today_allowance = (int)($state_cache["today_allowance_{$ch_id}"] ?? 0);
+    $ch_today_remaining = (int)($state_cache["today_remaining_{$ch_id}"] ?? 0);
+    $ch_remaining = (int)($state_cache["remaining_{$ch_id}"] ?? 0);
 
     switch ($ch_mode) {
         case 'daily':
-            $ch_today_allowance = $ch_quota;
-            $ch_today_remaining = max(0, $ch_today_allowance - $ch_today_used);
             $ch_monthly = 0;
-            $ch_remaining = 0;
             $ch_month_pct = 0;
             $ch_today_pct = $ch_today_allowance > 0 ? min(100, round($ch_today_used / $ch_today_allowance * 100, 1)) : 0;
             break;
 
         case 'monthly':
             $ch_monthly = $ch_quota;
-            $ch_remaining = max(0, $ch_monthly - $ch_month_used);
-            $ch_today_allowance = $days_remaining > 0 ? intdiv($ch_remaining, $days_remaining) : 0;
-            $ch_today_remaining = max(0, $ch_today_allowance - $ch_today_used);
             $ch_month_pct = $ch_monthly > 0 ? min(100, round($ch_month_used / $ch_monthly * 100, 1)) : 0;
             $ch_today_pct = $ch_today_allowance > 0 ? min(100, round($ch_today_used / $ch_today_allowance * 100, 1)) : 0;
             break;
@@ -113,11 +117,6 @@ foreach ($tap_channels as $ch) {
         case 'shared':
         default:
             $ch_monthly = $monthly_tokens;
-            $ch_remaining = $remaining;
-            $ch_today_allowance = $today_allowance;
-            $ch_today_used = $today_used;
-            $ch_month_used = $month_used;
-            $ch_today_remaining = $today_remaining;
             $ch_month_pct = $month_usage_pct;
             $ch_today_pct = $today_usage_pct;
             break;
@@ -143,16 +142,19 @@ $stmt = $tap_pdo->prepare("SELECT * FROM tap_logs ORDER BY created_at DESC LIMIT
 $stmt->execute();
 $recent_logs = $stmt->fetchAll();
 
-// 每日用量趋势（最近7天，所有渠道）
+// 每日用量趋势（最近7天，所有渠道）— 单次 GROUP BY 查询
+$seven_days_ago_ts = strtotime(date('Y-m-d 00:00:00', strtotime('-6 days')));
+$today_end_ts = strtotime(date('Y-m-d 23:59:59'));
+$stmt = $newapi_pdo->prepare("SELECT FROM_UNIXTIME(created_at, '%Y-%m-%d') AS day, COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS total FROM logs WHERE channel_id IN ($all_id_list) AND created_at >= ? AND created_at <= ? GROUP BY day");
+$stmt->execute([$seven_days_ago_ts, $today_end_ts]);
+$daily_map = [];
+while ($row = $stmt->fetch()) {
+    $daily_map[$row['day']] = (int)$row['total'];
+}
 $daily_stats = [];
 for ($i = 6; $i >= 0; $i--) {
     $date = date('Y-m-d', strtotime("-$i days"));
-    $day_start = strtotime("$date 00:00:00");
-    $day_end = strtotime("$date 23:59:59");
-    $stmt = $newapi_pdo->prepare("SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) as total FROM logs WHERE channel_id IN ($all_id_list) AND created_at >= ? AND created_at <= ?");
-    $stmt->execute([$day_start, $day_end]);
-    $day_total = (int)$stmt->fetch()['total'];
-    $daily_stats[] = ['date' => $date, 'total' => $day_total];
+    $daily_stats[] = ['date' => $date, 'total' => $daily_map[$date] ?? 0];
 }
 
 $mode_labels = ['shared' => '共享月度', 'monthly' => '独立月度', 'daily' => '独立日额'];

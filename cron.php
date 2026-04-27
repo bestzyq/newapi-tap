@@ -168,6 +168,14 @@ foreach ($tap_channels as $channel) {
 
     // 根据模式确定今日额度
     switch ($ch_mode) {
+        case 'unlimited':
+            $ch_today_allowance = 0;
+            $ch_today_remaining = 0;
+            $ch_monthly = 0;
+            $ch_remaining = 0;
+            $ch_month_pct = 0;
+            break;
+
         case 'daily':
             $ch_today_allowance = $ch_quota;
             $ch_today_remaining = max(0, $ch_today_allowance - $ch_today_used);
@@ -194,6 +202,14 @@ foreach ($tap_channels as $channel) {
             $ch_today_remaining = $global_today_remaining;
             $ch_month_pct = $monthly_tokens > 0 ? min(100, round($global_month_used / $monthly_tokens * 100, 1)) : 0;
             break;
+    }
+
+    // unlimited 模式仅统计用量，不控制水龙头
+    if ($ch_mode === 'unlimited') {
+        setState($tap_pdo, "month_used_{$ch_id}", (string)$ch_month_used);
+        setState($tap_pdo, "today_used_{$ch_id}", (string)$ch_today_used);
+        echo "[" . date('Y-m-d H:i:s') . "] 渠道 #{$ch_id} [unlimited] 仅监控 - 本月: " . formatTokens($ch_month_used) . ", 今日: " . formatTokens($ch_today_used) . "\n";
+        continue;
     }
 
     // 判断该渠道的水龙头状态

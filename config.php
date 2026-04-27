@@ -60,18 +60,33 @@ $monthly_tokens = envInt('MONTHLY_TOKENS', 100000000);
 
 // ============ 水龙头渠道配置 ============
 // 格式：渠道ID:模式:额度:统计:开启分组:关闭分组
-// 模式：shared=共享总额度均分, monthly=独立月度额度, daily=独立日额度
+// 模式：shared=共享总额度均分, monthly=独立月度额度, daily=独立日额度, unlimited=不限量(仅监控)
 // 统计：all=统计渠道全部调用, free=仅统计free组调用
+// unlimited 模式只需4段：渠道ID:unlimited:0:统计
 $tap_channels_raw = env('TAP_CHANNELS', '');
 $tap_channels = [];
 if ($tap_channels_raw !== '') {
     foreach (explode(';', $tap_channels_raw) as $ch_str) {
         $parts = explode(':', $ch_str, 6);
-        if (count($parts) >= 6) {
-            $mode = $parts[1];
-            if (!in_array($mode, ['shared', 'monthly', 'daily'])) {
-                $mode = 'shared';
+        $mode = isset($parts[1]) ? $parts[1] : 'shared';
+        if (!in_array($mode, ['shared', 'monthly', 'daily', 'unlimited'])) {
+            $mode = 'shared';
+        }
+
+        if ($mode === 'unlimited') {
+            $count = isset($parts[3]) ? $parts[3] : 'all';
+            if (!in_array($count, ['all', 'free'])) {
+                $count = 'all';
             }
+            $tap_channels[] = [
+                'channel_id'    => (int)$parts[0],
+                'mode'          => 'unlimited',
+                'quota'         => 0,
+                'count'         => $count,
+                'open_groups'   => '',
+                'closed_groups' => '',
+            ];
+        } elseif (count($parts) >= 6) {
             $count = $parts[3];
             if (!in_array($count, ['all', 'free'])) {
                 $count = 'all';
@@ -85,10 +100,6 @@ if ($tap_channels_raw !== '') {
                 'closed_groups' => $parts[5],
             ];
         } elseif (count($parts) >= 5) {
-            $mode = $parts[1];
-            if (!in_array($mode, ['shared', 'monthly', 'daily'])) {
-                $mode = 'shared';
-            }
             $tap_channels[] = [
                 'channel_id'    => (int)$parts[0],
                 'mode'          => $mode,

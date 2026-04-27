@@ -102,6 +102,12 @@ foreach ($tap_channels as $ch) {
     $ch_remaining = (int)($state_cache["remaining_{$ch_id}"] ?? 0);
 
     switch ($ch_mode) {
+        case 'unlimited':
+            $ch_monthly = 0;
+            $ch_month_pct = 0;
+            $ch_today_pct = 0;
+            break;
+
         case 'daily':
             $ch_monthly = 0;
             $ch_month_pct = 0;
@@ -158,7 +164,7 @@ for ($i = 6; $i >= 0; $i--) {
     $daily_stats[] = ['date' => $date, 'total' => $daily_map[$date] ?? 0];
 }
 
-$mode_labels = ['shared' => '共享月度', 'monthly' => '独立月度', 'daily' => '独立日额'];
+$mode_labels = ['shared' => '共享月度', 'monthly' => '独立月度', 'daily' => '独立日额', 'unlimited' => '不限量'];
 $count_labels = ['all' => '全部调用', 'free' => '仅免费调用'];
 
 function showLoginPage() {
@@ -301,7 +307,19 @@ function showLoginPage() {
                     <?php endif; ?>
                     <span class="channel-models"><code class="code-blue"><?= htmlspecialchars($cs['models']) ?></code></span>
                 </div>
-                <?php if ($cs['mode'] === 'daily'): ?>
+                <?php if ($cs['mode'] === 'unlimited'): ?>
+                <div class="channel-card-stats">
+                    <div class="channel-stat">
+                        <span class="channel-stat-label">本月已用</span>
+                        <span class="channel-stat-value warning"><?= formatTokens($cs['month_used']) ?></span>
+                    </div>
+                    <div class="channel-stat">
+                        <span class="channel-stat-label">今日已用</span>
+                        <span class="channel-stat-value info"><?= formatTokens($cs['today_used']) ?></span>
+                    </div>
+                </div>
+                <div class="channel-no-quota">不限量渠道</div>
+                <?php elseif ($cs['mode'] === 'daily'): ?>
                 <div class="channel-card-stats">
                     <div class="channel-stat">
                         <span class="channel-stat-label">日额度</span>

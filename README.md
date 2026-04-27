@@ -13,19 +13,22 @@
 
 ## 渠道模式
 
-系统支持三种渠道额度模式：
+系统支持四种渠道额度模式：
 
-| 模式 | 配置值 | 说明 | 是否参与月度总额 |
-|------|--------|------|-----------------|
-| 共享月度 | `shared` | 共享全局 `MONTHLY_TOKENS`，按剩余天数均分 | ✅ 是 |
-| 独立月度 | `monthly` | 独立月度额度，按剩余天数均分 | ❌ 否 |
-| 独立日额 | `daily` | 每日固定额度，次日自动重置 | ❌ 否 |
+| 模式 | 配置值 | 说明 | 是否参与月度总额 | 是否控制开关 |
+|------|--------|------|-----------------|-------------|
+| 共享月度 | `shared` | 共享全局 `MONTHLY_TOKENS`，按剩余天数均分 | ✅ 是 | ✅ 是 |
+| 独立月度 | `monthly` | 独立月度额度，按剩余天数均分 | ❌ 否 | ✅ 是 |
+| 独立日额 | `daily` | 每日固定额度，次日自动重置 | ❌ 否 | ✅ 是 |
+| 不限量 | `unlimited` | 仅监控用量和显示模型，不控制水龙头 | ❌ 否 | ❌ 否 |
 
 **共享月度（shared）**：多个渠道共享同一个月度总额度池，适合统一管理的渠道。
 
 **独立月度（monthly）**：渠道有独立的月度额度，按剩余天数均分，用完即关闸。不占用全局月度总额。
 
 **独立日额（daily）**：渠道每天有固定额度，用完当天关闸，次日自动重置。不参与月度总额计算，适合需要每日固定免费额度的渠道。
+
+**不限量（unlimited）**：渠道无额度限制，仅参与用量统计和模型显示，不会触发水龙头开关。适合需要监控但不需控制的渠道。
 
 ## 数据库架构
 
@@ -133,8 +136,16 @@ Register-ScheduledTask -TaskName "NewAPI-TAP" -Action $action -Trigger $Trigger 
 
 ### 配置格式
 
+**受控渠道**（shared / monthly / daily）：
+
 ```
-TAP_CHANNELS=渠道ID:模式:额度:开启分组:关闭分组
+TAP_CHANNELS=渠道ID:模式:额度:统计:开启分组:关闭分组
+```
+
+**不限量渠道**（unlimited）：
+
+```
+TAP_CHANNELS=渠道ID:unlimited:0:统计
 ```
 
 多个渠道用分号 `;` 分隔。
@@ -142,10 +153,11 @@ TAP_CHANNELS=渠道ID:模式:额度:开启分组:关闭分组
 ### 配置示例
 
 ```env
-# 渠道35: 共享月度，使用全局总额度均分
-# 渠道36: 独立月度，每月5000万token
-# 渠道37: 独立日额，每日200万token
-TAP_CHANNELS=35:shared:0:default,vip,svip,free:default,vip,svip;36:monthly:50000000:default,vip,free:default,vip;37:daily:2000000:default,free:default
+# 渠道35: 共享月度，统计全部调用
+# 渠道36: 独立月度，每月5000万token，仅统计免费调用
+# 渠道37: 独立日额，每日200万token，统计全部调用
+# 渠道38: 不限量，仅监控，统计全部调用
+TAP_CHANNELS=35:shared:0:all:default,vip,svip,free:default,vip,svip;36:monthly:50000000:free:default,vip,free:default,vip;37:daily:2000000:all:default,free:default;38:unlimited:0:all
 ```
 
 ### 字段说明
@@ -153,10 +165,11 @@ TAP_CHANNELS=35:shared:0:default,vip,svip,free:default,vip,svip;36:monthly:50000
 | 字段 | 说明 |
 |------|------|
 | 渠道ID | newapi 中 `channels` 表的 `id` |
-| 模式 | `shared` / `monthly` / `daily` |
-| 额度 | shared 填 0；monthly 填月度 token 数；daily 填每日 token 数 |
-| 开启分组 | 水龙头开启时 `channels.group` 的值（包含 `free`） |
-| 关闭分组 | 水龙头关闭时 `channels.group` 的值（不含 `free`） |
+| 模式 | `shared` / `monthly` / `daily` / `unlimited` |
+| 额度 | shared 填 0；monthly 填月度 token 数；daily 填每日 token 数；unlimited 填 0 |
+| 统计 | `all` 统计全部调用；`free` 仅统计 free 组调用 |
+| 开启分组 | 水龙头开启时 `channels.group` 的值（包含 `free`），unlimited 不需要 |
+| 关闭分组 | 水龙头关闭时 `channels.group` 的值（不含 `free`），unlimited 不需要 |
 
 ## 核心算法
 

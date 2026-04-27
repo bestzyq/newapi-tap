@@ -138,10 +138,11 @@ try {
         $row = $stmt->fetch();
         if ($row) {
             $model_count = count(array_filter(explode(',', $row['models'])));
-            $mode_labels = ['shared' => '共享月度', 'monthly' => '独立月度', 'daily' => '独立日额'];
+            $mode_labels = ['shared' => '共享月度', 'monthly' => '独立月度', 'daily' => '独立日额', 'unlimited' => '不限量'];
             $count_label = ($ch['count'] ?? 'all') === 'free' ? '，仅统计免费调用' : '';
-            $quota_info = $ch['mode'] === 'daily' ? formatTokens($ch['quota']) . ' tokens/日' : ($ch['mode'] === 'monthly' ? formatTokens($ch['quota']) . ' tokens/月' : '使用总额度均分');
-            echo "[✓] 渠道 #{$ch['channel_id']} [{$mode_labels[$ch['mode']]}] 存在，当前分组: {$row['group']}，模型数: {$model_count}，额度: {$quota_info}{$count_label}\n";
+            $quota_info = $ch['mode'] === 'unlimited' ? '不限量' : ($ch['mode'] === 'daily' ? formatTokens($ch['quota']) . ' tokens/日' : ($ch['mode'] === 'monthly' ? formatTokens($ch['quota']) . ' tokens/月' : '使用总额度均分'));
+            $group_info = $ch['mode'] === 'unlimited' ? '' : "，当前分组: {$row['group']}";
+            echo "[✓] 渠道 #{$ch['channel_id']} [{$mode_labels[$ch['mode']]}] 存在{$group_info}，模型数: {$model_count}，额度: {$quota_info}{$count_label}\n";
         } else {
             echo "[✗] 渠道 #{$ch['channel_id']} 不存在！请检查配置\n";
         }

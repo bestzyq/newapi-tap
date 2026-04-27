@@ -330,6 +330,15 @@ body {
     color: var(--badge-install-color);
     white-space: nowrap;
 }
+.channel-count-free {
+    font-size: 0.65rem;
+    font-weight: 600;
+    padding: 0.1rem 0.4rem;
+    border-radius: 9999px;
+    background: var(--badge-month-reset-bg);
+    color: var(--badge-month-reset-color);
+    white-space: nowrap;
+}
 .channel-models { flex: 1; }
 .channel-models code {
     word-break: break-all;

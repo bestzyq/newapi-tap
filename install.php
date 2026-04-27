@@ -139,8 +139,9 @@ try {
         if ($row) {
             $model_count = count(array_filter(explode(',', $row['models'])));
             $mode_labels = ['shared' => '共享月度', 'monthly' => '独立月度', 'daily' => '独立日额'];
+            $count_label = ($ch['count'] ?? 'all') === 'free' ? '，仅统计免费调用' : '';
             $quota_info = $ch['mode'] === 'daily' ? formatTokens($ch['quota']) . ' tokens/日' : ($ch['mode'] === 'monthly' ? formatTokens($ch['quota']) . ' tokens/月' : '使用总额度均分');
-            echo "[✓] 渠道 #{$ch['channel_id']} [{$mode_labels[$ch['mode']]}] 存在，当前分组: {$row['group']}，模型数: {$model_count}，额度: {$quota_info}\n";
+            echo "[✓] 渠道 #{$ch['channel_id']} [{$mode_labels[$ch['mode']]}] 存在，当前分组: {$row['group']}，模型数: {$model_count}，额度: {$quota_info}{$count_label}\n";
         } else {
             echo "[✗] 渠道 #{$ch['channel_id']} 不存在！请检查配置\n";
         }

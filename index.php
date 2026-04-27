@@ -125,6 +125,7 @@ foreach ($tap_channels as $ch) {
     $channel_stats[] = [
         'channel_id'      => $ch_id,
         'mode'            => $ch_mode,
+        'count'           => $ch['count'],
         'models'          => $models,
         'monthly_tokens'  => $ch_monthly,
         'month_used'      => $ch_month_used,
@@ -158,6 +159,7 @@ for ($i = 6; $i >= 0; $i--) {
 }
 
 $mode_labels = ['shared' => '共享月度', 'monthly' => '独立月度', 'daily' => '独立日额'];
+$count_labels = ['all' => '全部调用', 'free' => '仅免费调用'];
 
 function showLoginPage() {
 ?>
@@ -294,6 +296,9 @@ function showLoginPage() {
                 <div class="channel-card-header">
                     <span class="channel-id">#<?= $cs['channel_id'] ?></span>
                     <span class="channel-mode"><?= $mode_labels[$cs['mode']] ?? $cs['mode'] ?></span>
+                    <?php if (($cs['count'] ?? 'all') === 'free'): ?>
+                    <span class="channel-count-free">仅免费</span>
+                    <?php endif; ?>
                     <span class="channel-models"><code class="code-blue"><?= htmlspecialchars($cs['models']) ?></code></span>
                 </div>
                 <?php if ($cs['mode'] === 'daily'): ?>

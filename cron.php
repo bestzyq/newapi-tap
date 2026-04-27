@@ -56,14 +56,20 @@ if ($stored_month !== $current_month) {
 // ============ 计算全局月度用量（仅 shared 渠道参与） ============
 
 $shared_channel_ids = [];
+$shared_free_channel_ids = [];
 $all_channel_ids = [];
 foreach ($tap_channels as $ch) {
     $all_channel_ids[] = $ch['channel_id'];
     if ($ch['mode'] === 'shared') {
-        $shared_channel_ids[] = $ch['channel_id'];
+        if ($ch['count'] === 'free') {
+            $shared_free_channel_ids[] = $ch['channel_id'];
+        } else {
+            $shared_channel_ids[] = $ch['channel_id'];
+        }
     }
 }
 $shared_id_list = implode(',', array_map('intval', $shared_channel_ids));
+$shared_free_id_list = implode(',', array_map('intval', $shared_free_channel_ids));
 
 $month_start_ts = strtotime(date('Y-m-01 00:00:00'));
 $today_start_ts = strtotime(date('Y-m-d 00:00:00'));
@@ -71,40 +77,74 @@ $days_in_month = (int)date('t');
 $day_of_month = (int)date('j');
 $days_remaining = $days_in_month - $day_of_month + 1;
 
-// 全局月度用量（仅 shared 渠道）
+// 全局月度用量（shared 渠道，分 count=all 和 count=free 分别查询）
+$global_month_used = 0;
+$global_today_used = 0;
+
 if ($shared_id_list !== '') {
     $stmt = $newapi_pdo->prepare("SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) as total FROM logs WHERE channel_id IN ($shared_id_list) AND created_at >= ?");
     $stmt->execute([$month_start_ts]);
-    $global_month_used = (int)$stmt->fetch()['total'];
+    $global_month_used += (int)$stmt->fetch()['total'];
 
     $stmt = $newapi_pdo->prepare("SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) as total FROM logs WHERE channel_id IN ($shared_id_list) AND created_at >= ?");
     $stmt->execute([$today_start_ts]);
-    $global_today_used = (int)$stmt->fetch()['total'];
-
-    $global_remaining = max(0, $monthly_tokens - $global_month_used);
-    $global_today_allowance = $days_remaining > 0 ? intdiv($global_remaining, $days_remaining) : 0;
-    $global_today_remaining = max(0, $global_today_allowance - $global_today_used);
-} else {
-    $global_month_used = 0;
-    $global_today_used = 0;
-    $global_remaining = $monthly_tokens;
-    $global_today_allowance = 0;
-    $global_today_remaining = 0;
+    $global_today_used += (int)$stmt->fetch()['total'];
 }
+
+if ($shared_free_id_list !== '') {
+    $stmt = $newapi_pdo->prepare("SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) as total FROM logs WHERE channel_id IN ($shared_free_id_list) AND `group` = 'free' AND created_at >= ?");
+    $stmt->execute([$month_start_ts]);
+    $global_month_used += (int)$stmt->fetch()['total'];
+
+    $stmt = $newapi_pdo->prepare("SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) as total FROM logs WHERE channel_id IN ($shared_free_id_list) AND `group` = 'free' AND created_at >= ?");
+    $stmt->execute([$today_start_ts]);
+    $global_today_used += (int)$stmt->fetch()['total'];
+}
+
+$global_remaining = max(0, $monthly_tokens - $global_month_used);
+$global_today_allowance = $days_remaining > 0 ? intdiv($global_remaining, $days_remaining) : 0;
+$global_today_remaining = max(0, $global_today_allowance - $global_today_used);
 
 // ============ 批量查询渠道用量 ============
 
 $all_id_list = implode(',', array_map('intval', $all_channel_ids));
+$free_count_ids = [];
+$all_count_ids = [];
+foreach ($tap_channels as $ch) {
+    if ($ch['count'] === 'free') {
+        $free_count_ids[] = $ch['channel_id'];
+    } else {
+        $all_count_ids[] = $ch['channel_id'];
+    }
+}
+$all_count_id_list = implode(',', array_map('intval', $all_count_ids));
+$free_count_id_list = implode(',', array_map('intval', $free_count_ids));
+
 $today_usage_map = [];
 $month_usage_map = [];
-if ($all_id_list !== '') {
-    $stmt = $newapi_pdo->prepare("SELECT channel_id, COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS total FROM logs WHERE channel_id IN ($all_id_list) AND created_at >= ? GROUP BY channel_id");
+
+if ($all_count_id_list !== '') {
+    $stmt = $newapi_pdo->prepare("SELECT channel_id, COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS total FROM logs WHERE channel_id IN ($all_count_id_list) AND created_at >= ? GROUP BY channel_id");
     $stmt->execute([$today_start_ts]);
     while ($row = $stmt->fetch()) {
         $today_usage_map[(int)$row['channel_id']] = (int)$row['total'];
     }
 
-    $stmt = $newapi_pdo->prepare("SELECT channel_id, COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS total FROM logs WHERE channel_id IN ($all_id_list) AND created_at >= ? GROUP BY channel_id");
+    $stmt = $newapi_pdo->prepare("SELECT channel_id, COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS total FROM logs WHERE channel_id IN ($all_count_id_list) AND created_at >= ? GROUP BY channel_id");
+    $stmt->execute([$month_start_ts]);
+    while ($row = $stmt->fetch()) {
+        $month_usage_map[(int)$row['channel_id']] = (int)$row['total'];
+    }
+}
+
+if ($free_count_id_list !== '') {
+    $stmt = $newapi_pdo->prepare("SELECT channel_id, COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS total FROM logs WHERE channel_id IN ($free_count_id_list) AND `group` = 'free' AND created_at >= ? GROUP BY channel_id");
+    $stmt->execute([$today_start_ts]);
+    while ($row = $stmt->fetch()) {
+        $today_usage_map[(int)$row['channel_id']] = (int)$row['total'];
+    }
+
+    $stmt = $newapi_pdo->prepare("SELECT channel_id, COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS total FROM logs WHERE channel_id IN ($free_count_id_list) AND `group` = 'free' AND created_at >= ? GROUP BY channel_id");
     $stmt->execute([$month_start_ts]);
     while ($row = $stmt->fetch()) {
         $month_usage_map[(int)$row['channel_id']] = (int)$row['total'];

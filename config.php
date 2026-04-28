@@ -187,3 +187,29 @@ function formatTokens($tokens) {
 function formatNumber($num) {
     return formatTokens($num);
 }
+
+/**
+ * 读取 tap_state 配置值
+ */
+function getState($tap_pdo, $key, $default = '') {
+    $stmt = $tap_pdo->prepare("SELECT config_value FROM tap_state WHERE config_key = ?");
+    $stmt->execute([$key]);
+    $result = $stmt->fetch();
+    return $result ? $result['config_value'] : $default;
+}
+
+/**
+ * 写入 tap_state 配置值
+ */
+function setState($tap_pdo, $key, $value) {
+    $stmt = $tap_pdo->prepare("INSERT INTO tap_state (config_key, config_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE config_value = ?, updated_at = NOW()");
+    $stmt->execute([$key, $value, $value]);
+}
+
+/**
+ * 写入操作日志
+ */
+function writeLog($tap_pdo, $action, $message, $detail = null) {
+    $stmt = $tap_pdo->prepare("INSERT INTO tap_logs (action, message, detail) VALUES (?, ?, ?)");
+    $stmt->execute([$action, $message, $detail]);
+}

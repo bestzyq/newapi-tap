@@ -23,14 +23,6 @@ if (!empty($access_key)) {
 $newapi_pdo = getNewapiDB();
 $tap_pdo = getTapDB();
 
-// 获取状态
-function getState($tap_pdo, $key, $default = '') {
-    $stmt = $tap_pdo->prepare("SELECT config_value FROM tap_state WHERE config_key = ?");
-    $stmt->execute([$key]);
-    $result = $stmt->fetch();
-    return $result ? $result['config_value'] : $default;
-}
-
 // ============ 总体统计（从 cron 缓存读取，避免查询 logs 大表） ============
 $shared_channel_ids = [];
 $all_channel_ids = [];
@@ -50,7 +42,7 @@ $day_of_month = (int)date('j');
 $days_remaining = $days_in_month - $day_of_month + 1;
 
 // 批量读取 tap_state 缓存（由 cron.php 定期更新）
-$state_keys = ['tap_open', 'last_check', 'month_used', 'today_used', 'today_allowance', 'today_remaining', 'remaining'];
+$state_keys = ['tap_open', 'last_check', 'month_used', 'today_used', 'today_allowance', 'today_remaining', 'remaining', 'daily_trend'];
 foreach ($tap_channels as $ch) {
     $ch_id = $ch['channel_id'];
     $state_keys[] = "month_used_{$ch_id}";
@@ -149,19 +141,13 @@ $stmt = $tap_pdo->prepare("SELECT * FROM tap_logs ORDER BY created_at DESC LIMIT
 $stmt->execute();
 $recent_logs = $stmt->fetchAll();
 
-// 每日用量趋势（最近7天，所有渠道）— 单次 GROUP BY 查询
-$seven_days_ago_ts = strtotime(date('Y-m-d 00:00:00', strtotime('-6 days')));
-$today_end_ts = strtotime(date('Y-m-d 23:59:59'));
-$stmt = $newapi_pdo->prepare("SELECT FROM_UNIXTIME(created_at, '%Y-%m-%d') AS day, COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS total FROM logs WHERE channel_id IN ($all_id_list) AND created_at >= ? AND created_at <= ? GROUP BY day");
-$stmt->execute([$seven_days_ago_ts, $today_end_ts]);
-$daily_map = [];
-while ($row = $stmt->fetch()) {
-    $daily_map[$row['day']] = (int)$row['total'];
-}
+// 每日用量趋势（从 cron 缓存读取，避免查询 logs 大表）
+$daily_trend_json = $state_cache['daily_trend'] ?? '{}';
+$daily_trend_data = json_decode($daily_trend_json, true) ?: [];
 $daily_stats = [];
 for ($i = 6; $i >= 0; $i--) {
     $date = date('Y-m-d', strtotime("-$i days"));
-    $daily_stats[] = ['date' => $date, 'total' => $daily_map[$date] ?? 0];
+    $daily_stats[] = ['date' => $date, 'total' => $daily_trend_data[$date] ?? 0];
 }
 
 $mode_labels = ['shared' => '共享月度', 'monthly' => '独立月度', 'daily' => '独立日额', 'unlimited' => '不限量'];

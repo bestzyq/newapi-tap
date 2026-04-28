@@ -13,34 +13,19 @@ require_once __DIR__ . '/config.php';
 $newapi_pdo = getNewapiDB();
 $tap_pdo = getTapDB();
 
-// ============ 辅助函数 ============
+// ============ 清理旧日志（仅每天凌晨执行一次，避免频繁锁表） ============
 
-function getState($tap_pdo, $key, $default = '') {
-    $stmt = $tap_pdo->prepare("SELECT config_value FROM tap_state WHERE config_key = ?");
-    $stmt->execute([$key]);
-    $result = $stmt->fetch();
-    return $result ? $result['config_value'] : $default;
+$last_cleanup = getState($tap_pdo, 'last_log_cleanup', '');
+$today_date = date('Y-m-d');
+if ($last_cleanup !== $today_date) {
+    $batch_size = 1000;
+    do {
+        $stmt = $tap_pdo->prepare("DELETE FROM tap_logs WHERE created_at < DATE_SUB(NOW(), INTERVAL ? DAY) LIMIT $batch_size");
+        $stmt->execute([$log_retention_days]);
+        $deleted = $stmt->rowCount();
+    } while ($deleted >= $batch_size);
+    setState($tap_pdo, 'last_log_cleanup', $today_date);
 }
-
-function setState($tap_pdo, $key, $value) {
-    $stmt = $tap_pdo->prepare("INSERT INTO tap_state (config_key, config_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE config_value = ?, updated_at = NOW()");
-    $stmt->execute([$key, $value, $value]);
-}
-
-function writeLog($tap_pdo, $action, $message, $detail = null) {
-    $stmt = $tap_pdo->prepare("INSERT INTO tap_logs (action, message, detail) VALUES (?, ?, ?)");
-    $stmt->execute([$action, $message, $detail]);
-}
-
-// ============ 清理旧日志 ============
-
-// 分批删除旧日志，避免锁表
-$batch_size = 1000;
-do {
-    $stmt = $tap_pdo->prepare("DELETE FROM tap_logs WHERE created_at < DATE_SUB(NOW(), INTERVAL ? DAY) LIMIT $batch_size");
-    $stmt->execute([$log_retention_days]);
-    $deleted = $stmt->rowCount();
-} while ($deleted >= $batch_size);
 
 // ============ 检查月份切换 ============
 
@@ -77,35 +62,47 @@ $days_in_month = (int)date('t');
 $day_of_month = (int)date('j');
 $days_remaining = $days_in_month - $day_of_month + 1;
 
-// 全局月度用量（shared 渠道，分 count=all 和 count=free 分别查询）
+// 全局月度用量（shared 渠道，使用条件聚合合并为 2 次查询代替 4 次）
 $global_month_used = 0;
 $global_today_used = 0;
 
-if ($shared_id_list !== '') {
-    $stmt = $newapi_pdo->prepare("SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) as total FROM logs WHERE channel_id IN ($shared_id_list) AND created_at >= ?");
+// 构建所有 shared 渠道的 IN 列表（合并 shared + shared_free）
+$all_shared_ids = array_unique(array_merge($shared_channel_ids, $shared_free_channel_ids));
+$all_shared_id_list = implode(',', array_map('intval', $all_shared_ids));
+
+if ($all_shared_id_list !== '') {
+    // 构建条件聚合表达式：分别统计 count=all 渠道总量 和 count=free 渠道的 free 组用量
+    $shared_case = $shared_id_list !== ''
+        ? "SUM(CASE WHEN channel_id IN ($shared_id_list) THEN prompt_tokens + completion_tokens ELSE 0 END)"
+        : "0";
+    $free_case = $shared_free_id_list !== ''
+        ? "SUM(CASE WHEN channel_id IN ($shared_free_id_list) AND `group` = 'free' THEN prompt_tokens + completion_tokens ELSE 0 END)"
+        : "0";
+
+    // 月度查询：1 次代替 2 次
+    $stmt = $newapi_pdo->prepare(
+        "SELECT COALESCE($shared_case, 0) AS shared_total, COALESCE($free_case, 0) AS free_total
+         FROM logs WHERE channel_id IN ($all_shared_id_list) AND created_at >= ?"
+    );
     $stmt->execute([$month_start_ts]);
-    $global_month_used += (int)$stmt->fetch()['total'];
+    $row = $stmt->fetch();
+    $global_month_used = (int)$row['shared_total'] + (int)$row['free_total'];
 
-    $stmt = $newapi_pdo->prepare("SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) as total FROM logs WHERE channel_id IN ($shared_id_list) AND created_at >= ?");
+    // 今日查询：1 次代替 2 次
+    $stmt = $newapi_pdo->prepare(
+        "SELECT COALESCE($shared_case, 0) AS shared_total, COALESCE($free_case, 0) AS free_total
+         FROM logs WHERE channel_id IN ($all_shared_id_list) AND created_at >= ?"
+    );
     $stmt->execute([$today_start_ts]);
-    $global_today_used += (int)$stmt->fetch()['total'];
-}
-
-if ($shared_free_id_list !== '') {
-    $stmt = $newapi_pdo->prepare("SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) as total FROM logs WHERE channel_id IN ($shared_free_id_list) AND `group` = 'free' AND created_at >= ?");
-    $stmt->execute([$month_start_ts]);
-    $global_month_used += (int)$stmt->fetch()['total'];
-
-    $stmt = $newapi_pdo->prepare("SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) as total FROM logs WHERE channel_id IN ($shared_free_id_list) AND `group` = 'free' AND created_at >= ?");
-    $stmt->execute([$today_start_ts]);
-    $global_today_used += (int)$stmt->fetch()['total'];
+    $row = $stmt->fetch();
+    $global_today_used = (int)$row['shared_total'] + (int)$row['free_total'];
 }
 
 $global_remaining = max(0, $monthly_tokens - $global_month_used);
 $global_today_allowance = $days_remaining > 0 ? intdiv($global_remaining, $days_remaining) : 0;
 $global_today_remaining = max(0, $global_today_allowance - $global_today_used);
 
-// ============ 批量查询渠道用量 ============
+// ============ 批量查询渠道用量（条件聚合，4 次查询合并为 2 次） ============
 
 $all_id_list = implode(',', array_map('intval', $all_channel_ids));
 $free_count_ids = [];
@@ -123,32 +120,84 @@ $free_count_id_list = implode(',', array_map('intval', $free_count_ids));
 $today_usage_map = [];
 $month_usage_map = [];
 
-if ($all_count_id_list !== '') {
-    $stmt = $newapi_pdo->prepare("SELECT channel_id, COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS total FROM logs WHERE channel_id IN ($all_count_id_list) AND created_at >= ? GROUP BY channel_id");
+if ($all_id_list !== '') {
+    // 构建 WHERE 条件：all_count 渠道统计全部日志，free_count 渠道仅统计 free 组
+    $usage_where = '';
+    if ($all_count_id_list !== '' && $free_count_id_list !== '') {
+        $usage_where = "(channel_id IN ($all_count_id_list) OR (channel_id IN ($free_count_id_list) AND `group` = 'free'))";
+    } elseif ($all_count_id_list !== '') {
+        $usage_where = "channel_id IN ($all_count_id_list)";
+    } else {
+        $usage_where = "channel_id IN ($free_count_id_list) AND `group` = 'free'";
+    }
+
+    // 今日用量：1 次查询代替 2 次
+    $stmt = $newapi_pdo->prepare("SELECT channel_id, COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS total FROM logs WHERE $usage_where AND created_at >= ? GROUP BY channel_id");
     $stmt->execute([$today_start_ts]);
     while ($row = $stmt->fetch()) {
         $today_usage_map[(int)$row['channel_id']] = (int)$row['total'];
     }
 
-    $stmt = $newapi_pdo->prepare("SELECT channel_id, COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS total FROM logs WHERE channel_id IN ($all_count_id_list) AND created_at >= ? GROUP BY channel_id");
+    // 月度用量：1 次查询代替 2 次
+    $stmt = $newapi_pdo->prepare("SELECT channel_id, COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS total FROM logs WHERE $usage_where AND created_at >= ? GROUP BY channel_id");
     $stmt->execute([$month_start_ts]);
     while ($row = $stmt->fetch()) {
         $month_usage_map[(int)$row['channel_id']] = (int)$row['total'];
     }
 }
 
-if ($free_count_id_list !== '') {
-    $stmt = $newapi_pdo->prepare("SELECT channel_id, COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS total FROM logs WHERE channel_id IN ($free_count_id_list) AND `group` = 'free' AND created_at >= ? GROUP BY channel_id");
-    $stmt->execute([$today_start_ts]);
-    while ($row = $stmt->fetch()) {
-        $today_usage_map[(int)$row['channel_id']] = (int)$row['total'];
-    }
+// ============ 预加载渠道信息（消除循环内 N+1 查询） ============
 
-    $stmt = $newapi_pdo->prepare("SELECT channel_id, COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS total FROM logs WHERE channel_id IN ($free_count_id_list) AND `group` = 'free' AND created_at >= ? GROUP BY channel_id");
-    $stmt->execute([$month_start_ts]);
+// 1. 批量获取所有渠道的 group/models/priority/weight
+$channel_info_map = [];
+if ($all_id_list !== '') {
+    $stmt = $newapi_pdo->prepare("SELECT id, `group`, models, priority, weight FROM channels WHERE id IN ($all_id_list)");
+    $stmt->execute();
     while ($row = $stmt->fetch()) {
-        $month_usage_map[(int)$row['channel_id']] = (int)$row['total'];
+        $channel_info_map[(int)$row['id']] = $row;
     }
+}
+
+// 2. 批量获取所有渠道的 tap_state（替代循环内逐个 getState）
+$channel_state_keys = [];
+foreach ($tap_channels as $ch) {
+    $ch_id = $ch['channel_id'];
+    if ($ch['mode'] !== 'unlimited') {
+        $channel_state_keys[] = "tap_open_{$ch_id}";
+    }
+}
+$channel_state_cache = [];
+if (!empty($channel_state_keys)) {
+    $state_ph = implode(',', array_fill(0, count($channel_state_keys), '?'));
+    $stmt = $tap_pdo->prepare("SELECT config_key, config_value FROM tap_state WHERE config_key IN ($state_ph)");
+    $stmt->execute($channel_state_keys);
+    while ($row = $stmt->fetch()) {
+        $channel_state_cache[$row['config_key']] = $row['config_value'];
+    }
+}
+
+// 3. 收集待批量写入的状态
+$pending_states = [];
+function queueState($key, $value) {
+    global $pending_states;
+    $pending_states[$key] = $value;
+}
+function flushStates($tap_pdo) {
+    global $pending_states;
+    if (empty($pending_states)) return;
+    $sql = "INSERT INTO tap_state (config_key, config_value) VALUES ";
+    $pairs = [];
+    $params = [];
+    foreach ($pending_states as $k => $v) {
+        $pairs[] = "(?, ?)";
+        $params[] = $k;
+        $params[] = $v;
+    }
+    $sql .= implode(', ', $pairs);
+    $sql .= " ON DUPLICATE KEY UPDATE config_value = VALUES(config_value), updated_at = NOW()";
+    $stmt = $tap_pdo->prepare($sql);
+    $stmt->execute($params);
+    $pending_states = [];
 }
 
 // ============ 逐渠道检查与控制 ============
@@ -204,25 +253,24 @@ foreach ($tap_channels as $channel) {
             break;
     }
 
-    // unlimited 模式仅统计用量，不控制水龙头
+    // unlimited 模式仅统计用量，不控制水龙头，但计入全局开放状态
     if ($ch_mode === 'unlimited') {
-        setState($tap_pdo, "month_used_{$ch_id}", (string)$ch_month_used);
-        setState($tap_pdo, "today_used_{$ch_id}", (string)$ch_today_used);
+        $any_open = true;
+        queueState("month_used_{$ch_id}", (string)$ch_month_used);
+        queueState("today_used_{$ch_id}", (string)$ch_today_used);
         echo "[" . date('Y-m-d H:i:s') . "] 渠道 #{$ch_id} [unlimited] 仅监控 - 本月: " . formatTokens($ch_month_used) . ", 今日: " . formatTokens($ch_today_used) . "\n";
         continue;
     }
 
     // 判断该渠道的水龙头状态
     $should_open = $ch_today_used < $ch_today_allowance && $ch_today_allowance > 0;
-    $currently_open = getState($tap_pdo, $state_key, '1') === '1';
+    $currently_open = ($channel_state_cache[$state_key] ?? '1') === '1';
 
     // 确定期望的分组
     $desired_groups = $should_open ? $channel['open_groups'] : $channel['closed_groups'];
 
-    // 检查实际分组是否与期望一致
-    $stmt = $newapi_pdo->prepare("SELECT `group` FROM channels WHERE id = ?");
-    $stmt->execute([$ch_id]);
-    $actual_group = $stmt->fetchColumn() ?: '';
+    // 从预加载缓存获取实际分组（消除 N+1 查询）
+    $actual_group = $channel_info_map[$ch_id]['group'] ?? '';
 
     $sync_needed = ($actual_group !== $desired_groups);
 
@@ -232,9 +280,8 @@ foreach ($tap_channels as $channel) {
         $stmt->execute([$desired_groups, $ch_id]);
 
         if ($should_open) {
-            $stmt = $newapi_pdo->prepare("SELECT models, priority, weight FROM channels WHERE id = ?");
-            $stmt->execute([$ch_id]);
-            $ch_info = $stmt->fetch();
+            // 从预加载缓存获取渠道信息（消除 N+1 查询）
+            $ch_info = $channel_info_map[$ch_id] ?? [];
             $models_str = $ch_info['models'] ?? '';
             $ch_priority = (int)($ch_info['priority'] ?? 0);
             $ch_weight = (int)($ch_info['weight'] ?? 0);
@@ -256,7 +303,7 @@ foreach ($tap_channels as $channel) {
                 $abilities_added++;
             }
 
-            setState($tap_pdo, $state_key, '1');
+            queueState($state_key, '1');
             writeLog($tap_pdo, 'tap_open', "渠道 #{$ch_id} [{$ch_mode}] 水龙头已开启", json_encode([
                 'channel_id' => $ch_id,
                 'mode' => $ch_mode,
@@ -272,7 +319,7 @@ foreach ($tap_channels as $channel) {
             $stmt->execute([$ch_id]);
             $abilities_removed = $stmt->rowCount();
 
-            setState($tap_pdo, $state_key, '0');
+            queueState($state_key, '0');
             writeLog($tap_pdo, 'tap_close', "渠道 #{$ch_id} [{$ch_mode}] 水龙头已关闭", json_encode([
                 'channel_id' => $ch_id,
                 'mode' => $ch_mode,
@@ -290,9 +337,8 @@ foreach ($tap_channels as $channel) {
         $stmt->execute([$desired_groups, $ch_id]);
 
         if ($should_open) {
-            $stmt = $newapi_pdo->prepare("SELECT models, priority, weight FROM channels WHERE id = ?");
-            $stmt->execute([$ch_id]);
-            $ch_info = $stmt->fetch();
+            // 从预加载缓存获取渠道信息（消除 N+1 查询）
+            $ch_info = $channel_info_map[$ch_id] ?? [];
             $models_str = $ch_info['models'] ?? '';
             $ch_priority = (int)($ch_info['priority'] ?? 0);
             $ch_weight = (int)($ch_info['weight'] ?? 0);
@@ -335,12 +381,12 @@ foreach ($tap_channels as $channel) {
         echo "[" . date('Y-m-d H:i:s') . "] 渠道 #{$ch_id} [{$ch_mode}] 状态无变化 - 水龙头: " . ($currently_open ? '开启' : '关闭') . "\n";
     }
 
-    // 更新该渠道的状态缓存
-    setState($tap_pdo, "month_used_{$ch_id}", (string)$ch_month_used);
-    setState($tap_pdo, "today_used_{$ch_id}", (string)$ch_today_used);
-    setState($tap_pdo, "today_allowance_{$ch_id}", (string)$ch_today_allowance);
-    setState($tap_pdo, "today_remaining_{$ch_id}", (string)$ch_today_remaining);
-    setState($tap_pdo, "remaining_{$ch_id}", (string)$ch_remaining);
+    // 更新该渠道的状态缓存（加入队列，稍后批量写入）
+    queueState("month_used_{$ch_id}", (string)$ch_month_used);
+    queueState("today_used_{$ch_id}", (string)$ch_today_used);
+    queueState("today_allowance_{$ch_id}", (string)$ch_today_allowance);
+    queueState("today_remaining_{$ch_id}", (string)$ch_today_remaining);
+    queueState("remaining_{$ch_id}", (string)$ch_remaining);
 
     if ($should_open) {
         $any_open = true;
@@ -349,16 +395,46 @@ foreach ($tap_channels as $channel) {
     }
 }
 
-// ============ 更新全局状态缓存 ============
+// ============ 更新全局状态缓存（批量写入） ============
 
 $global_tap_open = $any_open ? '1' : '0';
-setState($tap_pdo, 'tap_open', $global_tap_open);
-setState($tap_pdo, 'month_used', (string)$global_month_used);
-setState($tap_pdo, 'today_used', (string)$global_today_used);
-setState($tap_pdo, 'today_allowance', (string)$global_today_allowance);
-setState($tap_pdo, 'today_remaining', (string)$global_today_remaining);
-setState($tap_pdo, 'remaining', (string)$global_remaining);
-setState($tap_pdo, 'last_check', date('Y-m-d H:i:s'));
+queueState('tap_open', $global_tap_open);
+queueState('month_used', (string)$global_month_used);
+queueState('today_used', (string)$global_today_used);
+queueState('today_allowance', (string)$global_today_allowance);
+queueState('today_remaining', (string)$global_today_remaining);
+queueState('remaining', (string)$global_remaining);
+queueState('last_check', date('Y-m-d H:i:s'));
+
+// 一次性批量写入所有待更新的状态（替代逐条 INSERT/UPDATE）
+flushStates($tap_pdo);
+
+// ============ 缓存 7 天趋势数据（供 index.php 读取，避免每次查 logs 大表） ============
+
+if ($all_id_list !== '') {
+    $seven_days_ago_ts = strtotime(date('Y-m-d 00:00:00', strtotime('-6 days')));
+    $today_end_ts = strtotime(date('Y-m-d 23:59:59'));
+    $stmt = $newapi_pdo->prepare(
+        "SELECT FROM_UNIXTIME(created_at, '%Y-%m-%d') AS day, COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS total
+         FROM logs WHERE channel_id IN ($all_id_list) AND created_at >= ? AND created_at <= ? GROUP BY day"
+    );
+    $stmt->execute([$seven_days_ago_ts, $today_end_ts]);
+    $daily_trend = [];
+    while ($row = $stmt->fetch()) {
+        $daily_trend[$row['day']] = (int)$row['total'];
+    }
+    // 填充缺失日期
+    for ($i = 6; $i >= 0; $i--) {
+        $date = date('Y-m-d', strtotime("-$i days"));
+        if (!isset($daily_trend[$date])) {
+            $daily_trend[$date] = 0;
+        }
+    }
+    ksort($daily_trend);
+    // 写入缓存（此时 flushStates 已执行，单独写入 1 条）
+    $stmt = $tap_pdo->prepare("INSERT INTO tap_state (config_key, config_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE config_value = VALUES(config_value), updated_at = NOW()");
+    $stmt->execute(['daily_trend', json_encode($daily_trend)]);
+}
 
 // ============ 输出摘要 ============
 

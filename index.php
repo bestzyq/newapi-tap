@@ -205,9 +205,9 @@ function showLoginPage() {
     <div class="container">
         <!-- Announcement Banner -->
         <?php if (!empty($announcement)): ?>
-        <div style="display:flex;align-items:center;gap:0.5rem;padding:0.75rem 1.25rem;margin-bottom:1.5rem;border-radius:8px;background:#fef9c3;border:1px solid #facc15;color:#854d0e;font-size:0.9rem;font-weight:500;text-align:center;justify-content:center;">
-            <span style="font-size:1.1rem;flex-shrink:0;">&#128227;</span>
-            <span style="line-height:1.5;"><?= htmlspecialchars($announcement) ?></span>
+        <div class="announcement-banner">
+            <span class="announcement-icon">&#128227;</span>
+            <span class="announcement-text"><?= htmlspecialchars($announcement) ?></span>
         </div>
         <?php endif; ?>
 

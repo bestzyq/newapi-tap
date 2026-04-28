@@ -68,6 +68,7 @@ TAP_DB_NAME=newapi_tap
 # 站点配置
 SITE_NAME=MyAPI-TAP
 API_SITE_URL=https://your-api-site.com
+ANNOUNCEMENT=欢迎使用免费API服务，请遵守使用规范
 
 # 月度总额度（仅 shared 模式渠道使用）
 MONTHLY_TOKENS=100000000

@@ -203,6 +203,14 @@ function showLoginPage() {
 </head>
 <body>
     <div class="container">
+        <!-- Announcement Banner -->
+        <?php if (!empty($announcement)): ?>
+        <div class="announcement-banner">
+            <span class="announcement-icon">&#128227;</span>
+            <span class="announcement-text"><?= htmlspecialchars($announcement) ?></span>
+        </div>
+        <?php endif; ?>
+
         <!-- Header -->
         <div class="header">
             <div class="header-row">

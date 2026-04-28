@@ -54,6 +54,7 @@ $tap_db_name = env('TAP_DB_NAME', 'newapi_tap');
 // ============ 站点配置 ============
 $site_name = env('SITE_NAME', 'NewAPI-TAP');
 $api_site_url = env('API_SITE_URL', '');
+$announcement = env('ANNOUNCEMENT', '');
 
 // ============ 每月免费额度配置 ============
 $monthly_tokens = envInt('MONTHLY_TOKENS', 100000000);

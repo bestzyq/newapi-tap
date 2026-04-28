@@ -204,13 +204,13 @@ body {
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    padding: 0.875rem 1.25rem;
+    padding: 0.75rem 1.25rem;
     margin-bottom: 1.5rem;
-    border-radius: 10px;
-    background: linear-gradient(135deg, #eff6ff, #dbeafe);
-    border: 1px solid #93c5fd;
-    color: #1e40af;
-    font-size: 0.95rem;
+    border-radius: 8px;
+    background: #fef9c3;
+    border: 1px solid #facc15;
+    color: #854d0e;
+    font-size: 0.9rem;
     font-weight: 500;
     text-align: center;
     justify-content: center;
@@ -220,9 +220,9 @@ body {
 
 @media (prefers-color-scheme: dark) {
     .announcement-banner {
-        background: linear-gradient(135deg, #1e3a5f, #1e40af);
-        border: 1px solid #3b82f6;
-        color: #93c5fd;
+        background: #713f12;
+        border-color: #a16207;
+        color: #fef08a;
     }
 }
 

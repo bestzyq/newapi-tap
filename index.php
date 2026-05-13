@@ -275,13 +275,14 @@ function showLoginPage() {
             <div class="chart-container">
                 <?php 
                 $max_daily = max(1, max(array_column($daily_stats, 'total')));
+                $bar_max_px = 130;
                 foreach ($daily_stats as $i => $stat): 
                     $is_today = $stat['date'] === date('Y-m-d');
-                    $pct = $stat['total'] > 0 ? max(3, ($stat['total'] / $max_daily) * 100) : 3;
+                    $bar_px = $stat['total'] > 0 ? max(3, ($stat['total'] / $max_daily) * $bar_max_px) : 3;
                 ?>
                 <div class="chart-bar-wrap">
                     <div class="chart-bar-value"><?= formatTokens($stat['total']) ?></div>
-                    <div class="chart-bar <?= $is_today ? 'today' : '' ?>" style="height: <?= $pct ?>%"></div>
+                    <div class="chart-bar <?= $is_today ? 'today' : '' ?>" style="height: <?= round($bar_px) ?>px"></div>
                     <div class="chart-bar-label"><?= $is_today ? '今日' : date('m/d', strtotime($stat['date'])) ?></div>
                 </div>
                 <?php endforeach; ?>

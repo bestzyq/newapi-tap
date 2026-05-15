@@ -348,6 +348,16 @@ body {
     font-size: 0.95rem;
     color: var(--text-primary);
 }
+.channel-priority {
+    font-size: 0.65rem;
+    font-weight: 600;
+    padding: 0.1rem 0.35rem;
+    border-radius: 4px;
+    background: var(--border-card);
+    color: var(--text-secondary);
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
 .channel-mode {
     font-size: 0.7rem;
     font-weight: 600;
@@ -365,6 +375,19 @@ body {
     background: var(--badge-month-reset-bg);
     color: var(--badge-month-reset-color);
     white-space: nowrap;
+}
+.channel-tag-disabled {
+    font-size: 0.65rem;
+    font-weight: 600;
+    padding: 0.1rem 0.4rem;
+    border-radius: 9999px;
+    background: var(--badge-tap-close-bg);
+    color: var(--badge-tap-close-color);
+    white-space: nowrap;
+}
+.channel-disabled {
+    opacity: 0.6;
+    border-color: var(--badge-tap-close-bg);
 }
 .channel-models { flex: 1; }
 .channel-models code {

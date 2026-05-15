@@ -73,11 +73,15 @@ $today_usage_pct = $today_allowance > 0 ? min(100, round($today_used / $today_al
 
 // ============ 分渠道统计（从缓存读取） ============
 // 批量获取渠道模型
-$stmt = $newapi_pdo->prepare("SELECT id, models FROM channels WHERE id IN ($all_id_list)");
+$stmt = $newapi_pdo->prepare("SELECT id, models, status, priority FROM channels WHERE id IN ($all_id_list)");
 $stmt->execute();
 $channel_models = [];
+$channel_status = [];
+$channel_priority = [];
 while ($row = $stmt->fetch()) {
     $channel_models[(int)$row['id']] = $row['models'] ?: '未知';
+    $channel_status[(int)$row['id']] = (int)$row['status'];
+    $channel_priority[(int)$row['id']] = (int)$row['priority'];
 }
 
 $channel_stats = [];
@@ -125,6 +129,8 @@ foreach ($tap_channels as $ch) {
         'mode'            => $ch_mode,
         'count'           => $ch['count'],
         'models'          => $models,
+        'status'          => $channel_status[$ch_id] ?? 1,
+        'priority'        => $channel_priority[$ch_id] ?? 0,
         'monthly_tokens'  => $ch_monthly,
         'month_used'      => $ch_month_used,
         'remaining'       => $ch_remaining,
@@ -135,6 +141,8 @@ foreach ($tap_channels as $ch) {
         'today_pct'       => $ch_today_pct,
     ];
 }
+
+usort($channel_stats, function($a, $b) { return $b['priority'] - $a['priority']; });
 
 // 获取最近日志
 $stmt = $tap_pdo->prepare("SELECT * FROM tap_logs ORDER BY created_at DESC LIMIT 20");
@@ -293,10 +301,14 @@ function showLoginPage() {
         <div class="section">
             <h2>渠道状态</h2>
             <?php foreach ($channel_stats as $cs): ?>
-            <div class="channel-card">
+            <div class="channel-card<?= $cs['status'] === 2 ? ' channel-disabled' : '' ?>">
                 <div class="channel-card-header">
                     <span class="channel-id">#<?= $cs['channel_id'] ?></span>
+                    <span class="channel-priority">P<?= $cs['priority'] ?></span>
                     <span class="channel-mode"><?= $mode_labels[$cs['mode']] ?? $cs['mode'] ?></span>
+                    <?php if ($cs['status'] === 2): ?>
+                    <span class="channel-tag-disabled">已禁用</span>
+                    <?php endif; ?>
                     <?php if (($cs['count'] ?? 'all') === 'free'): ?>
                     <span class="channel-count-free">仅免费</span>
                     <?php endif; ?>

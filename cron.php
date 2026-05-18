@@ -436,6 +436,43 @@ if ($all_id_list !== '') {
     $stmt->execute(['daily_trend', json_encode($daily_trend)]);
 }
 
+// ============ 缓存累计用量与热门模型（每日更新） ============
+
+$stats_cache_date = getState($tap_pdo, 'global_stats_date', '');
+$today_date = date('Y-m-d');
+
+if ($stats_cache_date !== $today_date && $all_id_list !== '') {
+    $stmt = $newapi_pdo->prepare(
+        "SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS total FROM logs WHERE channel_id IN ($all_id_list)"
+    );
+    $stmt->execute();
+    $total_all_time = (int)$stmt->fetch()['total'];
+
+    $top_models = [];
+    try {
+        $stmt = $newapi_pdo->prepare(
+            "SELECT model_name, COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS total 
+             FROM logs WHERE channel_id IN ($all_id_list) GROUP BY model_name ORDER BY total DESC LIMIT 5"
+        );
+        $stmt->execute();
+        while ($row = $stmt->fetch()) {
+            $top_models[] = ['model' => $row['model_name'], 'tokens' => (int)$row['total']];
+        }
+    } catch (PDOException $e) {
+        echo "[" . date('Y-m-d H:i:s') . "] 热门模型查询失败(可能缺少 model_name 列): " . $e->getMessage() . "\n";
+    }
+
+    $global_stats = json_encode([
+        'total_tokens' => $total_all_time,
+        'top_models'   => $top_models,
+    ]);
+    $stmt = $tap_pdo->prepare("INSERT INTO tap_state (config_key, config_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE config_value = VALUES(config_value), updated_at = NOW()");
+    $stmt->execute(['global_stats', $global_stats]);
+    setState($tap_pdo, 'global_stats_date', $today_date);
+
+    echo "[" . date('Y-m-d H:i:s') . "] 全局统计缓存已更新 - 累计: " . formatTokens($total_all_time) . "\n";
+}
+
 // ============ 输出摘要 ============
 
 echo "\n--- 全局摘要 (shared 渠道) ---\n";

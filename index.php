@@ -42,7 +42,7 @@ $day_of_month = (int)date('j');
 $days_remaining = $days_in_month - $day_of_month + 1;
 
 // 批量读取 tap_state 缓存（由 cron.php 定期更新）
-$state_keys = ['tap_open', 'last_check', 'month_used', 'today_used', 'today_allowance', 'today_remaining', 'remaining', 'daily_trend'];
+$state_keys = ['tap_open', 'last_check', 'month_used', 'today_used', 'today_allowance', 'today_remaining', 'remaining', 'daily_trend', 'global_stats'];
 foreach ($tap_channels as $ch) {
     $ch_id = $ch['channel_id'];
     $state_keys[] = "month_used_{$ch_id}";
@@ -70,6 +70,11 @@ $last_check = $state_cache['last_check'] ?? '从未';
 
 $month_usage_pct = $monthly_tokens > 0 ? min(100, round($month_used / $monthly_tokens * 100, 1)) : 0;
 $today_usage_pct = $today_allowance > 0 ? min(100, round($today_used / $today_allowance * 100, 1)) : 0;
+
+$global_stats_json = $state_cache['global_stats'] ?? '{}';
+$global_stats_data = json_decode($global_stats_json, true) ?: [];
+$total_all_time = (int)($global_stats_data['total_tokens'] ?? 0);
+$top_models = $global_stats_data['top_models'] ?? [];
 
 // ============ 分渠道统计（从缓存读取） ============
 // 批量获取渠道模型
@@ -225,6 +230,28 @@ function showLoginPage() {
         <div class="tap-banner <?= $tap_open ? 'open' : 'closed' ?>">
             <?= $tap_open ? '水龙头开启中 — 免费额度可用' : '水龙头已关闭 — 今日额度已耗尽' ?>
         </div>
+
+        <?php if ($total_all_time > 0 || !empty($top_models)): ?>
+        <div class="global-stats-bar">
+            <?php if ($total_all_time > 0): ?>
+            <div class="global-stats-item">
+                <span class="global-stats-label">累计调用</span>
+                <span class="global-stats-value"><?= formatTokens($total_all_time) ?> tokens</span>
+            </div>
+            <?php endif; ?>
+            <?php if (!empty($top_models)): ?>
+            <div class="global-stats-item">
+                <span class="global-stats-label">热门模型</span>
+                <span class="global-stats-models">
+                    <?php foreach (array_slice($top_models, 0, 3) as $i => $tm): ?>
+                    <?php if ($i > 0): ?><span class="global-stats-sep">·</span><?php endif; ?>
+                    <code class="code-blue"><?= htmlspecialchars($tm['model']) ?></code> <span class="global-stats-tokens"><?= formatTokens($tm['tokens']) ?></span>
+                    <?php endforeach; ?>
+                </span>
+            </div>
+            <?php endif; ?>
+        </div>
+        <?php endif; ?>
 
         <!-- Auto Refresh -->
         <div class="refresh-bar">

@@ -441,9 +441,9 @@ if ($all_id_list !== '') {
 $stats_cache_date = getState($tap_pdo, 'global_stats_date', '');
 $today_date = date('Y-m-d');
 
-if ($stats_cache_date !== $today_date && $all_id_list !== '') {
+if ($stats_cache_date !== $today_date) {
     $stmt = $newapi_pdo->prepare(
-        "SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS total FROM logs WHERE channel_id IN ($all_id_list)"
+        "SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS total FROM logs"
     );
     $stmt->execute();
     $total_all_time = (int)$stmt->fetch()['total'];
@@ -452,7 +452,7 @@ if ($stats_cache_date !== $today_date && $all_id_list !== '') {
     try {
         $stmt = $newapi_pdo->prepare(
             "SELECT model_name, COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS total 
-             FROM logs WHERE channel_id IN ($all_id_list) GROUP BY model_name ORDER BY total DESC LIMIT 5"
+             FROM logs GROUP BY model_name ORDER BY total DESC LIMIT 5"
         );
         $stmt->execute();
         while ($row = $stmt->fetch()) {
